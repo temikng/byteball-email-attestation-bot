@@ -8,7 +8,7 @@ exports.bLight = true;
 
 exports.storage = 'sqlite';
 
-// TOR is recommended.  If you don't run TOR, please comment the next two lines
+// TOR is recommended. If you don't run TOR, please comment the next two lines
 //exports.socksHost = '127.0.0.1';
 //exports.socksPort = 9050;
 
@@ -23,8 +23,10 @@ exports.bSingleAddress = false;
 exports.bStaticChangeAddress = true;
 exports.KEYS_FILENAME = 'keys.json';
 
-//email
+// smtp
 exports.useSmtp = false;
+
+// emails
 exports.admin_email = '';
 exports.from_email = '';
 
@@ -33,12 +35,8 @@ exports.bRunWitness = false;
 exports.THRESHOLD_DISTANCE = 20;
 exports.MIN_AVAILABLE_WITNESSINGS = 100;
 
+exports.priceInBytes = 8000;
+exports.rewardInBytes = 20000;
+exports.referralRewardInBytes = 20000;
 
-exports.priceInUSD = 8;
-exports.rewardInUSD = 20;
-exports.referralRewardInUSD = 20;
-
-// set this in conf.json
-exports.salt = null;
-
-exports.webPort = 8081;
+exports.webPort = 8080;

@@ -4,14 +4,14 @@ const desktopApp = require('byteballcore/desktop_app.js');
 const conf = require('byteballcore/conf');
 
 /**
- * clients responses
+ * responses for clients
  */
 exports.greeting = () => {
 	return "Here you can attest your email.";
 };
 
 /**
- * initialize bot errors
+ * errors initialize bot
  */
 exports.errorInitSql = () => {
 	return "please import db.sql file\n";

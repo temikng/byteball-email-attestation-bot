@@ -10,7 +10,7 @@ const texts = require('./modules/texts');
  * user pairs his device with bot
  */
 eventBus.on('paired', function (from_address) {
-	console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! on:paired', arguments);
+	console.log('on:paired', arguments);
 });
 
 eventBus.once('headless_wallet_ready', () => {
