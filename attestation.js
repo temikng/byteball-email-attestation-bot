@@ -3,14 +3,15 @@
 const conf = require('byteballcore/conf');
 const db = require('byteballcore/db');
 const eventBus = require('byteballcore/event_bus');
+const validationUtils = require('byteballcore/validation_utils');
 const headlessWallet = require('headless-byteball');
 const texts = require('./modules/texts');
 
 /**
  * user pairs his device with bot
  */
-eventBus.on('paired', function (from_address) {
-	console.log('on:paired', arguments);
+eventBus.on('paired', (from_address) => {
+	respond(from_address, '', texts.greeting() + "\n\n");
 });
 
 eventBus.once('headless_wallet_ready', () => {
@@ -19,7 +20,8 @@ eventBus.once('headless_wallet_ready', () => {
 	/**
 	 * check if database tables is created
 	 */
-	let arrTableNames = ['bots'];
+		// TODO: set all required table names
+	let arrTableNames = ['users'];
 	db.query("SELECT name FROM sqlite_master WHERE type='table' AND NAME IN (?)", [arrTableNames], (rows) => {
 		if (rows.length !== arrTableNames.length) {
 			error += texts.errorInitSql();
@@ -63,10 +65,8 @@ eventBus.once('headless_wallet_ready', () => {
 	});
 });
 
-eventBus.on('text', function (from_address, text) {
-	console.log('on:text', arguments);
-	const device = require('byteballcore/device');
-	device.sendMessageToDevice(from_address, 'text', "test message to device");
+eventBus.on('text', (from_address, text) => {
+	respond(from_address, text.trim(), '');
 });
 
 eventBus.on('new_my_transactions', function (arrUnits) {
@@ -82,4 +82,50 @@ if (conf.bRunWitness) {
 	eventBus.emit('headless_wallet_ready');
 } else {
 	headlessWallet.setupChatEventHandlers();
+}
+
+function respond (from_address, text, response) {
+	let device = require('byteballcore/device.js');
+	readUserInfo(from_address, (userInfo) => {
+
+		function checkUserAddress (onDone) {
+			if (validationUtils.isValidAddress(text)) {
+				userInfo.user_address = text;
+				response += `Thanks, going to attest your address ${userInfo.user_address}. `;
+				db.query('UPDATE users SET user_address=? WHERE device_address=?', [userInfo.user_address, from_address], () => {
+					onDone();
+				});
+				return;
+			}
+			if (userInfo.user_address) {
+				return onDone();
+			}
+			onDone(texts.insertMyAddress());
+		}
+
+		checkUserAddress((user_address_response) => {
+			if (user_address_response) {
+				return device.sendMessageToDevice(from_address, 'text', response + user_address_response);
+			}
+
+			// tmp
+			if (!response) {
+				response += 'unknown command';
+			}
+			device.sendMessageToDevice(from_address, 'text', response);
+
+		});
+	});
+}
+
+function readUserInfo (device_address, cb) {
+	db.query('SELECT user_address FROM users WHERE device_address = ?', [device_address], (rows) => {
+		if (rows.length) {
+			cb(rows[0]);
+		} else {
+			db.query(`INSERT ${db.getIgnore()} INTO users (device_address) VALUES(?)`, [device_address], () => {
+				cb({ device_address, user_address: null });
+			});
+		}
+	});
 }
