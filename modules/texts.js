@@ -6,7 +6,7 @@ const conf = require('byteballcore/conf');
 /**
  * responses for clients
  */
-exports.greeting = () => {
+exports.greeting = (strPriceAttestation, strPriceReward) => {
 	return [
 			"Here you can attest your email.\n\n",
 
@@ -17,13 +17,10 @@ exports.greeting = () => {
 
 			"You may also choose to make your attested email public.\n\n",
 
-			"If you are a non-US citizen, we will offer you to attest this fact, this information is always public. " +
-			"This is useful for participation in some ICOs which restrict access to their tokens only to non-US citizens.\n\n",
-
 			`The price of attestation is ${conf.priceInBytes} Bytes. ` +
 			"The payment is nonrefundable even if the attestation fails for any reason.\n\n",
 
-			"After payment, you will be received email for the verification. You will need to click at the specified link.\n\n",
+			"After payment, you will be received email with verification code. Verification code You will need to click at the specified link.\n\n",
 
 			`After you successfully verify yourself for the first time, you receive a ${conf.rewardInBytes} Bytes reward.`
 		].join('');
@@ -31,10 +28,122 @@ exports.greeting = () => {
 
 exports.insertMyAddress = () => {
 	return [
-		"Please send me your address that you wish to attest (click ... and Insert my address). ",
+		"Please send me your address that you wish to attest (click ... and Insert my address).\n",
 		"Make sure you are in a single-address wallet. ",
 		"If you don't have a single-address wallet, ",
 		"please add one (burger menu, add wallet) and fund it with the amount sufficient to pay for the attestation."
+	].join('');
+};
+
+exports.insertMyEmail = () => {
+	return 'Please send me your email that you wish to attest.';
+};
+
+exports.goingAttestAddress = (address) => {
+	return `Thanks, going to attest your address: ${address}.`;
+};
+
+exports.goingAttestEmail = (email) => {
+	return `Thanks, going to attest your email: ${email}.`;
+};
+
+exports.privateOrPublic = () => {
+	return [
+		"Store your email privately in your wallet (recommended) or post it publicly?\n\n",
+		"[private](command:private)\t[public](command:public)"
+	].join('');
+};
+
+exports.privateChoose = () => {
+	return [
+		"Your email will be kept private and stored in your wallet.\n",
+		"Click [public](command:public) now if you changed your mind."
+	].join('');
+};
+
+exports.publicChoose = () => {
+	return [
+		"Your email will be posted into the public database and will be available for everyone.\n",
+		"Click [private](command:private) now if you changed your mind."
+	].join('');
+};
+
+exports.pleasePay = (receivingAddress, price) => {
+	return `Please pay for the attestation: [attestation payment](byteball:${receivingAddress}?amount=${price}).`;
+};
+
+exports.pleasePayOrPrivacy = (receivingAddress, price, postPublicly) => {
+	return (postPublicly === null) ? exports.privateOrPublic() : exports.pleasePay(receivingAddress, price);
+};
+
+exports.receivedPaymentFromMultipleAddresses = () => {
+	return "Received a payment but looks like it was not sent from a single-address wallet.";
+};
+
+exports.receivedPaymentNotFromExpectedAddress = (address) => {
+	return [
+		`Received a payment but it was not sent from the expected address ${address}.\n`,
+		"Make sure you are in a single-address wallet, ",
+		"otherwise switch to a single-address wallet or create one and send me your address before paying."
+	].join('');
+};
+
+exports.receivedYourPayment = (amount) => {
+	return `Received your payment of ${amount} Bytes, waiting for confirmation. It should take 5-10 minutes.`;
+};
+
+exports.paymentIsConfirmed = () => {
+	return "Your payment is confirmed. Email will be send to your specified email address.";
+};
+
+exports.wrongVerificationCode = (leftNumberOfAttempts) => {
+	return `Wrong verification code! You have ${leftNumberOfAttempts} attempts left.`;
+};
+
+exports.emailWasSending = (emailAddress) => {
+	return `Email was sending to the ${emailAddress}. Enter to the chat verification code, specified in email.\n` +
+		"If you don't receive email, click [send email again](command:send email again).";
+};
+
+exports.attestedSuccessFirstTimeBonus = (bonusInBytes) => {
+	return `You were attested for the first time and will receive a welcome bonus of ${bonusInBytes} Bytes from Byteball distribution fund.`;
+};
+exports.attestedSuccessNextTime = () => {
+	return `You were attested.`;
+};
+
+exports.referredUserBonus = (bonusInBytes) => {
+	return [
+		"You referred a user who has just verified his identity and you will receive ",
+		`a reward of ${bonusInBytes} Bytes from Byteball distribution fund. ` +
+		"Thank you for bringing in a new byteballer, the value of the ecosystem grows with each new user!"
+	].join('');
+};
+
+exports.alreadyAttested = (attestationDate) => {
+	return `You were already attested at ${attestationDate} UTC. Attest [again](command: again)?`;
+};
+
+exports.currentAttestationFailed = () => {
+	return "Your attestation failed. Try [again](command: again)?";
+};
+exports.previousAttestationFailed = () => {
+	return "Your previous attestation failed. Try [again](command: again)?";
+};
+
+/**
+ * email
+ */
+exports.emailSubjectEmailAttestation = () => {
+	return "Email verification";
+};
+exports.emailBodyEmailAttestation = (verificationCode) => {
+	return [
+		`<p>Your verification code is <h3>${verificationCode}</h3></p>`,
+		`<p>Enter this code to chat with "${conf.deviceName}"</p>`,
+		'<p style="font-size: 13px; color: #727272; margin-top: 15px;">-------',
+		'<br>Please do not reply directly to this email.',
+		'</p>'
 	].join('');
 };
 

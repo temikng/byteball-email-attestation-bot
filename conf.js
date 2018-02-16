@@ -24,19 +24,26 @@ exports.bStaticChangeAddress = true;
 exports.KEYS_FILENAME = 'keys.json';
 
 // smtp
-exports.useSmtp = false;
+// exports.bUseSmtp = false;
+exports.bUseSmtp = true;
+exports.smtpHost = 'mail2.inevm.ru';
+exports.smtpUser = 'fgistp@inevm.ru';
+exports.smtpPort = 25;
+exports.smtpPassword = "\"[0kjrfwbZ";
 
 // emails
 exports.admin_email = '';
 exports.from_email = '';
+exports.from_email_name = 'Byteball email attestation bot';
 
 // witnessing
 exports.bRunWitness = false;
 exports.THRESHOLD_DISTANCE = 20;
 exports.MIN_AVAILABLE_WITNESSINGS = 100;
 
-exports.priceInBytes = 8000;
-exports.rewardInBytes = 20000;
-exports.referralRewardInBytes = 20000;
+exports.PRICE_TIMEOUT = 3600; // in seconds
+exports.priceInBytes = 100;
+exports.rewardInBytes = 200;
+exports.referralRewardInBytes = 200;
 
-exports.webPort = 8080;
+exports.LIMIT_NUMBER_OF_CHECKING_EMAIL_ATTEMPTS = 5;
