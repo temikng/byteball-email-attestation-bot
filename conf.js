@@ -24,12 +24,7 @@ exports.bStaticChangeAddress = true;
 exports.KEYS_FILENAME = 'keys.json';
 
 // smtp
-// exports.bUseSmtp = false;
-exports.bUseSmtp = true;
-exports.smtpHost = 'mail2.inevm.ru';
-exports.smtpUser = 'fgistp@inevm.ru';
-exports.smtpPort = 25;
-exports.smtpPassword = "\"[0kjrfwbZ";
+exports.bUseSmtp = false;
 
 // emails
 exports.admin_email = '';
@@ -46,4 +41,5 @@ exports.priceInBytes = 100;
 exports.rewardInBytes = 200;
 exports.referralRewardInBytes = 200;
 
+exports.MAX_REFERRAL_DEPTH = 5;
 exports.LIMIT_NUMBER_OF_CHECKING_EMAIL_ATTEMPTS = 5;

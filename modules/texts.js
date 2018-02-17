@@ -120,6 +120,10 @@ exports.referredUserBonus = (bonusInBytes) => {
 	].join('');
 };
 
+exports.codeConfirmedEmailInAttestation = (email) => {
+	return `Verification code was confirmed. Your email ${email} is in attestation. Please, wait.`;
+};
+
 exports.alreadyAttested = (attestationDate) => {
 	return `You were already attested at ${attestationDate} UTC. Attest [again](command: again)?`;
 };

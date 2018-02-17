@@ -1,12 +1,14 @@
 /*jslint node: true */
 'use strict';
+const constants = require('byteballcore/constants.js');
 const conf = require('byteballcore/conf');
 const db = require('byteballcore/db');
 const eventBus = require('byteballcore/event_bus');
 const validationUtils = require('byteballcore/validation_utils');
 const headlessWallet = require('headless-byteball');
 const texts = require('./modules/texts');
-const attestation = require('./modules/attestation');
+const reward = require('./modules/reward');
+const emailAttestation = require('./modules/attestation');
 const notifications = require('./modules/notifications');
 
 /**
@@ -77,17 +79,94 @@ function handleWalletReady() {
 
 		headlessWallet.issueOrSelectAddressByIndex(0, 0, (address1) => {
 			console.log('== email attestation address: ' + address1);
-			attestation.assocAttestorAddresses['email'] = address1;
+			emailAttestation.emailAttestorAddress = address1;
+
 			headlessWallet.issueOrSelectAddressByIndex(0, 1, (address2) => {
 				console.log('== distribution address: ' + address2);
-				// reward.distribution_address = address3;
+				reward.distributionAddress = address2;
 
-				// setInterval(realNameAttestation.retryPostingAttestations, 10*1000);
-				// setInterval(reward.retrySendingRewards, 10*1000);
-				// setInterval(moveFundsToAttestorAddresses, 60*1000);
+				setInterval(emailAttestation.retryPostingAttestations, 10*1000);
+				setInterval(reward.retrySendingRewards, 10*1000);
+				setInterval(retrySendingEmails, 60*1000);
+				setInterval(moveFundsToAttestorAddresses, 60*1000);
 			});
 		});
 	});
+}
+
+function moveFundsToAttestorAddresses() {
+	let network = require('byteballcore/network.js');
+	if (network.isCatchingUp())
+		return;
+
+	console.log('moveFundsToAttestorAddresses');
+	db.query(
+		`SELECT DISTINCT receiving_address
+		FROM receiving_addresses 
+		CROSS JOIN outputs ON receiving_address=address 
+		JOIN units USING(unit)
+		WHERE is_stable=1 AND is_spent=0 AND asset IS NULL
+		LIMIT ?`,
+		[constants.MAX_AUTHORS_PER_UNIT],
+		(rows) => {
+			if (rows.length === 0) {
+				return;
+			}
+
+			let arrAddresses = rows.map(row => row.receiving_address);
+			// console.error(arrAddresses);
+			let headlessWallet = require('headless-byteball');
+			headlessWallet.sendMultiPayment({
+				asset: null,
+				to_address: emailAttestation.emailAttestorAddress,
+				send_all: true,
+				paying_addresses: arrAddresses
+			}, (err, unit) => {
+				if (err)
+					console.error("failed to move funds: "+err);
+				else
+					console.log("moved funds, unit "+unit);
+			});
+		}
+	);
+}
+
+function retrySendingEmails() {
+	let device = require('byteballcore/device.js');
+	db.query(
+		`SELECT 
+			ve.code, ve.user_email, ve.transaction_id,
+			ra.device_address
+		FROM verification_email ve
+		JOIN transactions t ON t.transaction_id = ve.transaction_id
+		JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address AND ra.user_email = ve.user_email
+		WHERE ve.is_sent = 0 AND ve.result IS NULL
+		ORDER BY ve.creation_date ASC`,
+		(rows) => {
+			rows.forEach((row) => {
+				notifications.notifyEmail(
+					row.user_email,
+					null,
+					texts.emailSubjectEmailAttestation(),
+					texts.emailBodyEmailAttestation(row.code),
+					(err) => {
+						if (err) {
+							return console.error(err);
+						}
+						db.query(
+							`UPDATE verification_email 
+							SET is_sent=?
+							WHERE transaction_id=? AND user_email=?`,
+							[1, row.transaction_id, row.user_email],
+							() => {
+								return device.sendMessageToDevice(row.device_address, 'text', texts.emailWasSending(row.user_email));
+							}
+						);
+					}
+				);
+			});
+		}
+	);
 }
 
 function handleNewTransactions(arrUnits) {
@@ -211,10 +290,10 @@ function handleTransactionsBecameStable(arrUnits) {
 											return console.error(err);
 										}
 										db.query(
-											`INSERT INTO verification_email 
-											(transaction_id, user_email, is_sent) 
-											VALUES(?,?,?)`,
-											[row.transaction_id, row.user_email, 1],
+											`UPDATE verification_email 
+											SET is_sent=?
+											WHERE transaction_id=? AND user_email=?`,
+											[1, row.transaction_id, row.user_email],
 											() => {
 												// TODO: check the emails if they are not sent
 												return device.sendMessageToDevice(row.device_address, 'text', texts.emailWasSending(row.user_email));
@@ -334,6 +413,7 @@ function respond (from_address, text, response = '') {
 							}
 
 							let row = rows[0];
+							let transaction_id = row.transaction_id;
 
 							/**
 							 * if user payed, but transaction did not become stable
@@ -357,7 +437,7 @@ function respond (from_address, text, response = '') {
 										`UPDATE verification_email 
 										SET result=?, result_date=${db.getNow()}
 										WHERE transaction_id=? AND user_email=?`,
-										[1, row.transaction_id, userInfo.user_email],
+										[1, transaction_id, userInfo.user_email],
 										() => {
 
 											db.query(
@@ -368,15 +448,73 @@ function respond (from_address, text, response = '') {
 												WHERE t.receiving_address=? AND ve.result=1`,
 												[receiving_address],
 												(rows) => {
-													if (rows.length === 0) {
-														// TODO: handle error
-													}
 													let row = rows[0];
 													if (row.count > 1) {
 														response += (response ? response + '\n\n' : '') + texts.attestedSuccessNextTime();
 													} else {
-														response += (response ? response + '\n\n' : '') + texts.attestedSuccessFirstTimeBonus(conf.rewardInBytes);
-														// TODO: pay referral
+														// response += (response ? response + '\n\n' : '') + texts.attestedSuccessFirstTimeBonus(conf.rewardInBytes);
+
+														/**
+														 *
+														 */
+														db.query(
+															`INSERT ${db.getIgnore()} INTO attestation_units 
+															(transaction_id) 
+															VALUES (?)`,
+															[transaction_id],
+															() => {
+																let [attestationPayload, src_profile] = emailAttestation.getAttestationPayloadAndSrcProfile(row.user_address, row.user_email, row.post_publicly);
+																if (!row.post_publicly) {
+																	emailAttestation.postAndWriteAttestation(transaction_id, attestationPayload.emailAttestorAddress, attestationPayload, src_profile);
+																}
+																if (conf.rewardInBytes) {
+																	let rewardInBytes = conf.rewardInBytes;
+																	db.query(
+																		`INSERT ${db.getIgnore()} INTO reward_units 
+																		(transaction_id, user_address, user_id, reward) 
+																		VALUES (?,?,?,?)`,
+																		[transaction_id, row.user_address, attestationPayload.profile.user_id, rewardInBytes],
+																		(res) => {
+																			console.log(`reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
+																			if (!res.affectedRows) {
+																				return console.log(`duplicate user_address or user_id: ${row.user_address}, ${attestationPayload.profile.user_id}`);
+																			}
+
+																			device.sendMessageToDevice(row.device_address, 'text', texts.attestedSuccessFirstTimeBonus(rewardInBytes));
+																			reward.sendAndWriteReward('attestation', transaction_id);
+
+																			if (conf.referralRewardInBytes) {
+																				let referralRewardInBytes = conf.referralRewardInBytes;
+																				reward.findReferral(row.payment_unit, (referring_user_id, referring_user_address, referring_user_device_address) => {
+																					if (!referring_user_address) {
+																						return console.log("no referring user for " + row.user_address);
+																					}
+
+																					db.query(
+																						`INSERT ${db.getIgnore()} INTO referral_reward_units
+																						(transaction_id, user_address, user_id, new_user_address, new_user_id, reward)
+																						VALUES (?, ?,?, ?,?, ?)`,
+																						[transaction_id,
+																							referring_user_address, referring_user_id,
+																							row.user_address, attestationPayload.profile.user_id,
+																							referralRewardInBytes],
+																						(res) => {
+																							console.log(`referral_reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
+																							if (!res.affectedRows) {
+																								return notifications.notifyAdmin("duplicate referral reward", `referral reward for new user ${row.user_address} ${attestationPayload.profile.user_id} already written`);
+																							}
+
+																							device.sendMessageToDevice(referring_user_device_address, 'text', `You referred a user who has just verified his identity and you will receive a reward of ${conf.referralRewardInBytes} Bytes from Byteball distribution fund. Thank you for bringing in a new byteballer, the value of the ecosystem grows with each new user!`);
+																							reward.sendAndWriteReward('referral', transaction_id);
+																						}
+																					);
+																				});
+																			}
+																		}
+																	);
+																}
+															}
+														);
 													}
 
 													device.sendMessageToDevice(from_address, 'text', response);
@@ -468,6 +606,17 @@ function respond (from_address, text, response = '') {
 							 */
 							if (verification_email_result === 0) {
 								return device.sendMessageToDevice(from_address, 'text', (response ? response + '\n\n' : '') + texts.previousAttestationFailed());
+							}
+
+							/**
+							 * email is in attestation
+							 */
+							if (!row.attestation_date) {
+								return device.sendMessageToDevice(
+									from_address,
+									'text',
+									(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
+								);
 							}
 
 							/**

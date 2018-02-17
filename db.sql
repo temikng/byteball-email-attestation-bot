@@ -51,10 +51,9 @@ CREATE TABLE verification_email (
 
 CREATE TABLE attestation_units (
 	transaction_id INTEGER NOT NULL,
-	attestation_type CHAR(20) NOT NULL,
 	attestation_unit CHAR(44) NULL UNIQUE,
 	attestation_date TIMESTAMP NULL,
-	PRIMARY KEY (transaction_id, attestation_type),
+	PRIMARY KEY (transaction_id),
 	FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id),
 	FOREIGN KEY (attestation_unit) REFERENCES units(unit)
 );
