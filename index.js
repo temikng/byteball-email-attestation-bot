@@ -324,7 +324,7 @@ function respond (from_address, text, response = '') {
 						[receiving_address],
 						(rows) => {
 							/**
-							 * if user still don't pay
+							 * if user didn't pay yet
 							 */
 							if (rows.length === 0) {
 								return device.sendMessageToDevice(
@@ -423,7 +423,7 @@ function respond (from_address, text, response = '') {
 									);
 								} else {
 									/**
-									 * user enter wrong verification code
+									 * user enters wrong verification code
 									 */
 									let currNumberAttempts = Number(row.number_of_checking_attempts) + 1;
 									let leftNumberAttempts = conf.LIMIT_NUMBER_OF_CHECKING_EMAIL_ATTEMPTS - currNumberAttempts;
@@ -505,7 +505,7 @@ function readUserInfo (device_address, callback) {
 }
 
 /**
- *
+ * read or assign receiving address
  * @param device_address
  * @param userInfo
  * @param callback
