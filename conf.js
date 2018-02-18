@@ -3,8 +3,7 @@
 exports.port = null;
 //exports.myUrl = 'wss://mydomain.com/bb';
 exports.bServeAsHub = false;
-//exports.bLight = false;
-exports.bLight = true;
+exports.bLight = false;
 
 exports.storage = 'sqlite';
 
@@ -24,7 +23,11 @@ exports.bStaticChangeAddress = true;
 exports.KEYS_FILENAME = 'keys.json';
 
 // smtp
-exports.bUseSmtp = false;
+exports.bUseSmtp = true;
+exports.smtpHost = '';
+exports.smtpUser = '';
+exports.smtpPort = 465;
+exports.smtpPassword = '';
 
 // emails
 exports.admin_email = '';
