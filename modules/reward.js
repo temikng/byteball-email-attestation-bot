@@ -17,10 +17,16 @@ function sendReward(user_address, reward, device_address, onDone) {
 		change_address: exports.distributionAddress,
 		recipient_device_address: device_address
 	}, (err, unit) => {
-		if (err)
-			console.log("failed to send reward: "+err);
-		else
-			console.log("sent reward, unit "+unit);
+		if (err) {
+			console.error("failed to send reward: ", err);
+			let balances = require('byteballcore/balances');
+			balances.readBalance(exports.distributionAddress, (balance) => {
+				console.error(balance);
+				notifications.notifyAdmin('failed to send reward', err + ", balance: " + JSON.stringify(balance));
+			});
+		} else {
+			console.log("sent reward, unit " + unit);
+		}
 		onDone(err, unit);
 	});
 }
@@ -28,7 +34,7 @@ function sendReward(user_address, reward, device_address, onDone) {
 function sendAndWriteReward(reward_type, transaction_id) {
 	const mutex = require('byteballcore/mutex.js');
 	const tableName = (reward_type === 'referral') ? 'referral_reward_units' : 'reward_units';
-	mutex.lock(['tx-'+transaction_id], unlock => {
+	mutex.lock(['tx-'+transaction_id], (unlock) => {
 		db.query(
 			`SELECT 
 				ra.device_address, 
@@ -72,8 +78,8 @@ function retrySendingRewardsOfType(reward_type) {
 		`SELECT transaction_id 
 		FROM ${tableName} 
 		WHERE reward_unit IS NULL`,
-		rows => {
-			rows.forEach(row => {
+		(rows) => {
+			rows.forEach((row) => {
 				sendAndWriteReward(reward_type, row.transaction_id);
 			});
 		}
@@ -91,6 +97,8 @@ function findReferral(payment_unit, handleReferral) {
 
 	function goBack(arrUnits) {
 		depth++;
+		// console.error('goBack', depth, arrUnits);
+		if (!arrUnits || !arrUnits.length) return handleReferral();
 		db.query(
 			`SELECT 
 				address, src_unit, main_chain_index 
@@ -101,7 +109,7 @@ function findReferral(payment_unit, handleReferral) {
 				AND asset IS NULL`,
 			[arrUnits],
 			(rows) => {
-				rows.forEach(row => {
+				rows.forEach((row) => {
 					if (!assocMcisByAddress[row.address] || assocMcisByAddress[row.address] < row.main_chain_index)
 						assocMcisByAddress[row.address] = row.main_chain_index;
 				});
@@ -134,7 +142,7 @@ function findReferral(payment_unit, handleReferral) {
 
 				let max_mci = 0;
 				let best_user_id, best_row;
-				rows.forEach(row => {
+				rows.forEach((row) => {
 					if (row.app !== 'attestation') {
 						throw Error(`unexpected app ${row.app} for payment ${payment_unit}`);
 					}

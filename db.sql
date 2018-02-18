@@ -47,7 +47,7 @@ CREATE TABLE verification_email (
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY (transaction_id, user_email),
 	FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
-)
+);
 
 CREATE TABLE attestation_units (
 	transaction_id INTEGER NOT NULL,

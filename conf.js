@@ -36,10 +36,10 @@ exports.bRunWitness = false;
 exports.THRESHOLD_DISTANCE = 20;
 exports.MIN_AVAILABLE_WITNESSINGS = 100;
 
-exports.PRICE_TIMEOUT = 3600; // in seconds
-exports.priceInBytes = 100;
-exports.rewardInBytes = 200;
-exports.referralRewardInBytes = 200;
+exports.priceInBytes = 4000;
+exports.rewardInBytes = 10;
+exports.referralRewardInBytes = 10;
 
+exports.PRICE_TIMEOUT = 3600; // in seconds
 exports.MAX_REFERRAL_DEPTH = 5;
 exports.LIMIT_NUMBER_OF_CHECKING_EMAIL_ATTEMPTS = 5;

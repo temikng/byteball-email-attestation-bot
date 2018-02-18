@@ -89,7 +89,7 @@ exports.receivedPaymentNotFromExpectedAddress = (address) => {
 };
 
 exports.receivedYourPayment = (amount) => {
-	return `Received your payment of ${amount} Bytes, waiting for confirmation. It should take 5-10 minutes.`;
+	return `Received your payment of ${amount} Bytes, waiting for confirmation. It should take 5-15 minutes.`;
 };
 
 exports.paymentIsConfirmed = () => {

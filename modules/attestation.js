@@ -5,16 +5,7 @@ const objectHash = require('byteballcore/object_hash.js');
 const db = require('byteballcore/db');
 const notifications = require('./notifications');
 
-exports.getAttestationPayload = (user_address, user_email) => {
-	return {
-		address: user_address,
-		profile: {
-			email: user_email
-		}
-	};
-};
-
-function retryPostingAttestations() {
+function retryPostingAttestations(callbackRowAttestation) {
 	db.query(
 		`SELECT 
 			t.transaction_id, 
@@ -24,18 +15,26 @@ function retryPostingAttestations() {
 		JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
 		WHERE au.attestation_unit IS NULL`,
 		(rows) => {
-			console.error('retryPostingAttestations', rows);
 			rows.forEach((row) => {
 				let	[attestation, src_profile] = getAttestationPayloadAndSrcProfile(row.user_address, row.user_email, row.post_publicly);
-				postAndWriteAttestation(row.transaction_id, exports.emailAttestorAddress, attestation, src_profile);
+				// console.error('retryPostingAttestations: ' + row.transaction_id + ' ' + row.post_publicly);
+				// console.error(attestation);
+				// console.error(src_profile);
+				postAndWriteAttestation(row.transaction_id, exports.emailAttestorAddress, attestation, src_profile, (err, unit) => {
+					if (err) {
+						return callbackRowAttestation(err);
+					}
+					callbackRowAttestation(null, row.transaction_id, row.user_address, unit);
+				});
 			});
 		}
 	);
 }
 
-function postAndWriteAttestation(transaction_id, attestor_address, attestation_payload, src_profile){
+function postAndWriteAttestation(transaction_id, attestor_address, attestation_payload, src_profile, callback) {
+	if (!callback) callback = function () {};
 	const mutex = require('byteballcore/mutex.js');
-	mutex.lock(['tx-'+transaction_id], unlock => {
+	mutex.lock(['tx-'+transaction_id], (unlock) => {
 		db.query(
 			`SELECT ra.device_address, au.attestation_date
 			FROM attestation_units au
@@ -43,14 +42,16 @@ function postAndWriteAttestation(transaction_id, attestor_address, attestation_p
 			JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
 			WHERE t.transaction_id=?`,
 			[transaction_id],
-			rows => {
+			(rows) => {
 				let row = rows[0];
 				if (row.attestation_date) { // already posted
+					callback(null, null);
 					return unlock();
 				}
 
 				postAttestation(attestor_address, attestation_payload, (err, unit) => {
 					if (err) {
+						callback(err);
 						return unlock();
 					}
 
@@ -77,8 +78,9 @@ function postAndWriteAttestation(transaction_id, attestor_address, attestation_p
 							text += "\n\nRemember, we have a referral program: " +
 								"if you send Bytes from your attested address to a new user who is not attested yet, " +
 								"and he/she uses those Bytes to pay for a successful attestation, " +
-								"you receive a $"+conf.referralRewardInBytes+" reward in Bytes.";
+								"you receive a "+conf.referralRewardInBytes+" Bytes reward.";
 							device.sendMessageToDevice(row.device_address, 'text', text);
+							callback(null, unit);
 							unlock();
 						}
 					);
@@ -91,7 +93,11 @@ function postAndWriteAttestation(transaction_id, attestor_address, attestation_p
 function postAttestation(attestor_address, payload, onDone) {
 	function onError(err) {
 		console.error("attestation failed: " + err);
-		notifications.notifyAdmin("attestation failed", err);
+		let balances = require('byteballcore/balances');
+		balances.readBalance(attestor_address, (balance) => {
+			console.error(balance);
+			notifications.notifyAdmin('attestation failed', err + ", balance: " + JSON.stringify(balance));
+		});
 		onDone(err);
 	}
 
@@ -114,6 +120,8 @@ function postAttestation(attestor_address, payload, onDone) {
 			ifNotEnoughFunds: onError,
 			ifError: onError,
 			ifOk: (objJoint) => {
+				// console.error('ifOk');
+				// console.error(objJoint);
 				network.broadcastJoint(objJoint);
 				onDone(null, objJoint.unit.unit);
 			}
@@ -171,6 +179,7 @@ function hideProfile(profile) {
 		if (!profile.hasOwnProperty(field)) continue;
 		let value = profile[field];
 		let blinding = composer.generateBlinding();
+		// console.error(`hideProfile: ${field}, ${value}, ${blinding}`);
 		let hidden_value = objectHash.getBase64Hash([value, blinding]);
 		hidden_profile[field] = hidden_value;
 		src_profile[field] = [value, blinding];
