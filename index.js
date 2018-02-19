@@ -566,7 +566,7 @@ function respond (from_address, text, response = '') {
 									 * user enters wrong verification code
 									 */
 									let currNumberAttempts = Number(row.number_of_attempts) + 1;
-									let leftNumberAttempts = conf.LIMIT_NUMBER_OF_CHECKING_EMAIL_ATTEMPTS - currNumberAttempts;
+									let leftNumberAttempts = conf.MAX_ATTEMPTS - currNumberAttempts;
 									if (leftNumberAttempts > 0) {
 										db.query(
 											`UPDATE verification_emails 

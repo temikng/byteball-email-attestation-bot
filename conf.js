@@ -45,4 +45,4 @@ exports.referralRewardInBytes = 10;
 
 exports.PRICE_TIMEOUT = 3600; // in seconds
 exports.MAX_REFERRAL_DEPTH = 5;
-exports.LIMIT_NUMBER_OF_CHECKING_EMAIL_ATTEMPTS = 5;
+exports.MAX_ATTEMPTS = 5;
