@@ -404,8 +404,8 @@ function notifyByEmailAndMarkIsSent(user_email, code, transaction_id, device_add
 		from: `${conf.from_email_name ? conf.from_email_name + ' ' : ''}<${conf.from_email}>`,
 		to: user_email,
 		subject: texts.emailSubjectEmailAttestation(),
-		text: texts.emailPlainBodyEmailAttestation(code),
-		html: texts.emailBodyEmailAttestation(code)
+		body: texts.emailPlainBodyEmailAttestation(code),
+		htmlBody: texts.emailBodyEmailAttestation(code)
 	}, (err) => {
 		if (err) {
 			console.error(err);
