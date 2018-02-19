@@ -8,12 +8,12 @@ const notifications = require('./notifications');
 function retryPostingAttestations(callbackRowAttestation) {
 	db.query(
 		`SELECT 
-			t.transaction_id, 
-			ra.user_email, ra.post_publicly, ra.user_address
-		FROM attestation_units au
-		JOIN transactions t ON t.transaction_id = au.transaction_id
-		JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
-		WHERE au.attestation_unit IS NULL`,
+			transaction_id, 
+			user_email, post_publicly, user_address
+		FROM attestation_units
+		JOIN transactions USING(transaction_id)
+		JOIN receiving_addresses USING(receiving_address)
+		WHERE attestation_unit IS NULL`,
 		(rows) => {
 			rows.forEach((row) => {
 				let	[attestation, src_profile] = getAttestationPayloadAndSrcProfile(row.user_address, row.user_email, row.post_publicly);
@@ -36,11 +36,11 @@ function postAndWriteAttestation(transaction_id, attestor_address, attestation_p
 	const mutex = require('byteballcore/mutex.js');
 	mutex.lock(['tx-'+transaction_id], (unlock) => {
 		db.query(
-			`SELECT ra.device_address, au.attestation_date
-			FROM attestation_units au
-			JOIN transactions t ON t.transaction_id = au.transaction_id
-			JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
-			WHERE t.transaction_id=?`,
+			`SELECT device_address, attestation_date
+			FROM attestation_units
+			JOIN transactions USING(transaction_id)
+			JOIN receiving_addresses USING(receiving_address)
+			WHERE transaction_id=?`,
 			[transaction_id],
 			(rows) => {
 				let row = rows[0];

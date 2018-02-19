@@ -37,12 +37,11 @@ function sendAndWriteReward(reward_type, transaction_id) {
 	mutex.lock(['tx-'+transaction_id], (unlock) => {
 		db.query(
 			`SELECT 
-				ra.device_address, 
-				ru.reward_date, ru.reward, ru.user_address
-			FROM ${tableName} ru
-			JOIN transactions t ON t.transaction_id = ru.transaction_id 
-			JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
-			WHERE ru.transaction_id=?`,
+				device_address, reward_date, reward, ${tableName}.user_address
+			FROM ${tableName} 
+			JOIN transactions USING(transaction_id) 
+			JOIN receiving_addresses USING(receiving_address)
+			WHERE transaction_id=?`,
 			[transaction_id],
 			(rows) => {
 				if (rows.length === 0) {
@@ -125,13 +124,13 @@ function findReferral(payment_unit, handleReferral) {
 		db.query(
 			`SELECT 
 				address, user_address, device_address, payload, app
-			FROM attestations a
-			JOIN messages m  USING(unit, message_index)
-			JOIN attestation_units au ON unit=attestation_unit
-			JOIN transactions t USING(transaction_id)
-			JOIN receiving_addresses ra USING(receiving_address)
+			FROM attestations
+			JOIN messages USING(unit, message_index)
+			JOIN attestation_units ON unit=attestation_unit AND attestation_type='real name'
+			JOIN transactions USING(transaction_id)
+			JOIN receiving_addresses USING(receiving_address)
 			WHERE address IN(${arrAddresses.map(db.escape).join(', ')}) 
-				AND attestor_address=? 
+				AND +attestor_address=? 
 				AND transactions.payment_unit!=?`,
 			[attestation.emailAttestorAddress, payment_unit],
 			(rows) => {

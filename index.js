@@ -108,7 +108,7 @@ function moveFundsToAttestorAddresses() {
 	db.query(
 		`SELECT DISTINCT receiving_address
 		FROM receiving_addresses 
-		CROSS JOIN outputs ON receiving_address=address 
+		CROSS JOIN outputs ON receiving_address = address 
 		JOIN units USING(unit)
 		WHERE is_stable=1 AND is_spent=0 AND asset IS NULL
 		LIMIT ?`,
@@ -155,11 +155,13 @@ function retryPostingAttestations() {
 		db.query(
 			`SELECT
 				COUNT(*) AS count
-			FROM receiving_addresses ra
-			JOIN transactions t ON t.receiving_address = ra.receiving_address
-			LEFT JOIN verification_emails ve ON ve.transaction_id = t.transaction_id AND ve.user_email = ra.user_email
-			LEFT JOIN attestation_units au ON au.transaction_id = t.transaction_id
-			WHERE ra.user_address = ? AND ve.result = 1 AND au.attestation_unit IS NOT NULL`,
+			FROM receiving_addresses
+			JOIN transactions USING(receiving_address)
+			LEFT JOIN verification_emails USING(transaction_id, user_email)
+			LEFT JOIN attestation_units USING(transaction_id)
+			WHERE user_address = ? 
+				AND verification_emails.result = 1 
+				AND attestation_units.attestation_unit IS NOT NULL`,
 			[user_address],
 			(rows) => {
 				let row = rows[0];
@@ -168,11 +170,11 @@ function retryPostingAttestations() {
 
 				db.query(
 					`SELECT
-						ra.user_email, ra.post_publicly, ra.device_address, 
-						t.payment_unit
-					FROM receiving_addresses ra
-					JOIN transactions t ON t.receiving_address = ra.receiving_address
-					WHERE t.transaction_id=? AND ra.user_address=?`,
+						user_email, post_publicly, device_address, 
+						payment_unit
+					FROM receiving_addresses
+					JOIN transactions USING(receiving_address)
+					WHERE transaction_id=? AND user_address=?`,
 					[transaction_id, user_address],
 					(rows) => {
 						let row = rows[0];
@@ -242,13 +244,13 @@ function retryPostingAttestations() {
 function retrySendingEmails() {
 	db.query(
 		`SELECT 
-			ve.code, ve.user_email, ve.transaction_id,
-			ra.device_address
-		FROM verification_emails ve
-		JOIN transactions t ON t.transaction_id = ve.transaction_id
-		JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address AND ra.user_email = ve.user_email
-		WHERE ve.is_sent = 0 AND ve.result IS NULL
-		ORDER BY ve.creation_date ASC`,
+			code, user_email, transaction_id,
+			device_address
+		FROM verification_emails
+		JOIN transactions USING(transaction_id)
+		JOIN receiving_addresses USING(receiving_address, user_email)
+		WHERE is_sent = 0 AND result IS NULL
+		ORDER BY verification_emails.creation_date ASC`,
 		(rows) => {
 			rows.forEach((row) => {
 				notifyByEmailAndMarkIsSent(row.user_email, row.code, row.transaction_id, row.device_address);
@@ -261,17 +263,17 @@ function handleNewTransactions(arrUnits) {
 	let device = require('byteballcore/device.js');
 	db.query(
 		`SELECT
-			o.amount, o.asset, o.unit,
-			ra.receiving_address, ra.device_address, ra.user_address, ra.price, 
-			${db.getUnixTimestamp('ra.last_price_date')} AS price_ts
-		FROM outputs o
-		CROSS JOIN receiving_addresses ra ON ra.receiving_address=o.address
-		WHERE o.unit IN(?)
+			amount, asset, unit,
+			receiving_address, device_address, user_address, price, 
+			${db.getUnixTimestamp('last_price_date')} AS price_ts
+		FROM outputs
+		CROSS JOIN receiving_addresses ON receiving_addresses.receiving_address = outputs.address
+		WHERE unit IN(?)
 			AND NOT EXISTS (
 				SELECT 1
-				FROM unit_authors ua
-				CROSS JOIN my_addresses ma ON ma.address=ua.address
-				WHERE ua.unit=o.unit
+				FROM unit_authors
+				CROSS JOIN my_addresses USING(address)
+				WHERE unit_authors.unit = outputs.unit
 			)`,
 		[arrUnits],
 		(rows) => {
@@ -342,11 +344,11 @@ function handleTransactionsBecameStable(arrUnits) {
 	let device = require('byteballcore/device.js');
 	db.query(
 		`SELECT 
-			t.transaction_id, 
-			ra.device_address, ra.user_address, ra.user_email
-		FROM transactions t
-		JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
-		WHERE t.payment_unit IN(?)`,
+			transaction_id, 
+			device_address, user_address, user_email
+		FROM transactions
+		JOIN receiving_addresses USING(receiving_address)
+		WHERE payment_unit IN(?)`,
 		[arrUnits],
 		(rows) => {
 			rows.forEach((row) => {
@@ -368,8 +370,8 @@ function handleTransactionsBecameStable(arrUnits) {
 
 							db.query(
 								`INSERT INTO verification_emails 
-							(transaction_id, user_email, code) 
-							VALUES(?,?,?)`,
+								(transaction_id, user_email, code) 
+								VALUES(?,?,?)`,
 								[row.transaction_id, row.user_email, verificationCode],
 								() => {
 									notifyByEmailAndMarkIsSent(row.user_email, verificationCode, row.transaction_id, row.device_address);
@@ -502,15 +504,15 @@ function respond (from_address, text, response = '') {
 
 					db.query(
 						`SELECT
-							ve.code, ve.result, ve.number_of_attempts, 
-							t.transaction_id, t.is_confirmed, t.received_amount,
-							au.attestation_date, ra.user_address
-						FROM transactions t
-						JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
-						LEFT JOIN verification_emails ve ON ve.transaction_id = t.transaction_id AND ve.user_email = ra.user_email
-						LEFT JOIN attestation_units au ON au.transaction_id = t.transaction_id
-						WHERE t.receiving_address=?
-						ORDER BY t.transaction_id DESC
+							code, result, number_of_attempts, 
+							transaction_id, is_confirmed, received_amount,
+							attestation_date, user_address
+						FROM transactions
+						JOIN receiving_addresses USING(receiving_address)
+						LEFT JOIN verification_emails USING(transaction_id, user_email)
+						LEFT JOIN attestation_units USING(transaction_id)
+						WHERE receiving_address=?
+						ORDER BY transaction_id DESC
 						LIMIT 1`,
 						[receiving_address],
 						(rows) => {
