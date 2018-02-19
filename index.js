@@ -363,7 +363,7 @@ function handleTransactionsBecameStable(arrUnits) {
 						/**
 						 * create and send verification code to attestation email
 						 */
-						randomCryptoString(6, (err, verificationCode) => {
+						generateRandomCryptoString(6, (err, verificationCode) => {
 							if (err) {
 								return notifications.notifyAdmin('random crypto string', err);
 							}
@@ -385,7 +385,7 @@ function handleTransactionsBecameStable(arrUnits) {
 	);
 }
 
-function randomCryptoString(lenOfStr, cb) {
+function generateRandomCryptoString(lenOfStr, cb) {
 	if (lenOfStr < 1) throw new Error('the string must contain minimum 1 letter or more');
 	crypto.randomBytes(Math.ceil(5 / 2), (err, buf) => {
 		if (err) return cb(err);
