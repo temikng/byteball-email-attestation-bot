@@ -394,7 +394,7 @@ function notifyByEmailAndMarkIsSent(user_email, code, transaction_id, device_add
 				WHERE transaction_id=? AND user_email=?`,
 				[1, transaction_id, user_email],
 				() => {
-					device.sendMessageToDevice(device_address, 'text', texts.emailWasSending(user_email));
+					device.sendMessageToDevice(device_address, 'text', texts.emailWasSent(user_email));
 				}
 			);
 		}
@@ -599,7 +599,7 @@ function respond (from_address, text, response = '') {
 								return device.sendMessageToDevice(
 									from_address,
 									'text',
-									(response ? response + '\n\n' : '') + texts.emailWasSending(userInfo.user_email)
+									(response ? response + '\n\n' : '') + texts.emailWasSent(userInfo.user_email)
 								);
 							}
 

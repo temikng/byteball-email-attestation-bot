@@ -100,8 +100,8 @@ exports.wrongVerificationCode = (leftNumberOfAttempts) => {
 	return `Wrong verification code! You have ${leftNumberOfAttempts} attempts left.`;
 };
 
-exports.emailWasSending = (emailAddress) => {
-	return `Email was sending to the ${emailAddress}. Enter to the chat verification code, specified in email.\n` +
+exports.emailWasSent = (emailAddress) => {
+	return `Email was sent to the ${emailAddress}. Enter to the chat verification code, specified in email.\n` +
 		"If you don't receive email, click [send email again](command:send email again).";
 };
 
