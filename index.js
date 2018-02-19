@@ -54,7 +54,7 @@ function handleWalletReady() {
 	 * check if database tables is created
 	 */
 	let arrTableNames = [
-		'users','receiving_addresses','transactions','verification_email','attestation_units','rejected_payments',
+		'users','receiving_addresses','transactions','verification_emails','attestation_units','rejected_payments',
 		'reward_units','referral_reward_units'
 	];
 	db.query("SELECT name FROM sqlite_master WHERE type='table' AND NAME IN (?)", [arrTableNames], (rows) => {
@@ -155,7 +155,7 @@ function retryPostingAttestations() {
 				COUNT(*) AS count
 			FROM receiving_addresses ra
 			JOIN transactions t ON t.receiving_address = ra.receiving_address
-			LEFT JOIN verification_email ve ON ve.transaction_id = t.transaction_id AND ve.user_email = ra.user_email
+			LEFT JOIN verification_emails ve ON ve.transaction_id = t.transaction_id AND ve.user_email = ra.user_email
 			LEFT JOIN attestation_units au ON au.transaction_id = t.transaction_id
 			WHERE ra.user_address = ? AND ve.result = 1 AND au.attestation_unit IS NOT NULL`,
 			[user_address],
@@ -242,7 +242,7 @@ function retrySendingEmails() {
 		`SELECT 
 			ve.code, ve.user_email, ve.transaction_id,
 			ra.device_address
-		FROM verification_email ve
+		FROM verification_emails ve
 		JOIN transactions t ON t.transaction_id = ve.transaction_id
 		JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address AND ra.user_email = ve.user_email
 		WHERE ve.is_sent = 0 AND ve.result IS NULL
@@ -361,7 +361,7 @@ function handleTransactionsBecameStable(arrUnits) {
 						 */
 						const verificationCode = Math.random().toString().slice(2,8);
 						db.query(
-							`INSERT INTO verification_email 
+							`INSERT INTO verification_emails 
 							(transaction_id, user_email, code) 
 							VALUES(?,?,?)`,
 							[row.transaction_id, row.user_email, verificationCode],
@@ -389,7 +389,7 @@ function notifyByEmailAndMarkIsSent(user_email, code, transaction_id, device_add
 			}
 
 			db.query(
-				`UPDATE verification_email 
+				`UPDATE verification_emails 
 				SET is_sent=?
 				WHERE transaction_id=? AND user_email=?`,
 				[1, transaction_id, user_email],
@@ -481,12 +481,12 @@ function respond (from_address, text, response = '') {
 
 					db.query(
 						`SELECT
-							ve.code, ve.result, ve.number_of_checking_attempts, 
+							ve.code, ve.result, ve.number_of_attempts, 
 							t.transaction_id, t.is_confirmed, t.received_amount,
 							au.attestation_date, ra.user_address
 						FROM transactions t
 						JOIN receiving_addresses ra ON ra.receiving_address = t.receiving_address
-						LEFT JOIN verification_email ve ON ve.transaction_id = t.transaction_id AND ve.user_email = ra.user_email
+						LEFT JOIN verification_emails ve ON ve.transaction_id = t.transaction_id AND ve.user_email = ra.user_email
 						LEFT JOIN attestation_units au ON au.transaction_id = t.transaction_id
 						WHERE t.receiving_address=?
 						ORDER BY t.transaction_id DESC
@@ -525,7 +525,7 @@ function respond (from_address, text, response = '') {
 								if (text === row.code) {
 
 									return db.query(
-										`UPDATE verification_email 
+										`UPDATE verification_emails 
 										SET result=?, result_date=${db.getNow()}
 										WHERE transaction_id=? AND user_email=?`,
 										[1, transaction_id, userInfo.user_email],
@@ -553,7 +553,7 @@ function respond (from_address, text, response = '') {
 									 * user wants to receive email again
 									 */
 									return db.query(
-										`UPDATE verification_email 
+										`UPDATE verification_emails 
 										SET is_sent=?
 										WHERE transaction_id=? AND user_email=?`,
 										[0, row.transaction_id, userInfo.user_email],
@@ -565,19 +565,19 @@ function respond (from_address, text, response = '') {
 									/**
 									 * user enters wrong verification code
 									 */
-									let currNumberAttempts = Number(row.number_of_checking_attempts) + 1;
+									let currNumberAttempts = Number(row.number_of_attempts) + 1;
 									let leftNumberAttempts = conf.LIMIT_NUMBER_OF_CHECKING_EMAIL_ATTEMPTS - currNumberAttempts;
 									if (leftNumberAttempts > 0) {
 										db.query(
-											`UPDATE verification_email 
-											SET number_of_checking_attempts=? 
+											`UPDATE verification_emails 
+											SET number_of_attempts=? 
 											WHERE transaction_id=? AND user_email=?`,
 											[currNumberAttempts, row.transaction_id, userInfo.user_email]
 										);
 									} else {
 										db.query(
-											`UPDATE verification_email 
-											SET number_of_checking_attempts=?, result=?, result_date=${db.getNow()}
+											`UPDATE verification_emails 
+											SET number_of_attempts=?, result=?, result_date=${db.getNow()}
 											WHERE transaction_id=? AND user_email=?`,
 											[currNumberAttempts, 0, row.transaction_id, userInfo.user_email]
 										);

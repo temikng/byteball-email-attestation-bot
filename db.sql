@@ -36,11 +36,11 @@ CREATE TABLE transactions (
 	FOREIGN KEY (payment_unit) REFERENCES units(unit) ON DELETE CASCADE
 );
 
-CREATE TABLE verification_email (
+CREATE TABLE verification_emails (
 	transaction_id INTEGER NOT NULL,
 	user_email VARCHAR(320) NOT NULL,
 	code CHAR(8) NOT NULL,
-	number_of_checking_attempts TINYINT NOT NULL DEFAULT 0,
+	number_of_attempts TINYINT NOT NULL DEFAULT 0,
 	is_sent INT NOT NULL DEFAULT 0, -- 1 sent, 0 not sent
 	result TINYINT NULL, -- 1 success, 0 failure, NULL pending or abandoned
 	result_date TIMESTAMP NULL,
