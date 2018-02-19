@@ -58,6 +58,19 @@ CREATE TABLE attestation_units (
 	FOREIGN KEY (attestation_unit) REFERENCES units(unit)
 );
 
+CREATE TABLE rejected_payments (
+	rejected_payment_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+	receiving_address CHAR(32) NOT NULL,
+	price INT NOT NULL,
+	received_amount INT NOT NULL,
+	delay INT NOT NULL,
+	payment_unit CHAR(44) NOT NULL UNIQUE,
+	payment_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	error TEXT NOT NULL,
+	FOREIGN KEY (receiving_address) REFERENCES receiving_addresses(receiving_address),
+	FOREIGN KEY (payment_unit) REFERENCES units(unit) ON DELETE CASCADE
+);
+
 CREATE TABLE reward_units (
 	transaction_id INTEGER NOT NULL PRIMARY KEY,
 	user_address CHAR(32) NOT NULL UNIQUE,
