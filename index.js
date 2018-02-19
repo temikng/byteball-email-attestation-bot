@@ -53,8 +53,10 @@ function handleWalletReady() {
 	/**
 	 * check if database tables is created
 	 */
-		// TODO: set all required table names
-	let arrTableNames = ['users','receiving_addresses'];
+	let arrTableNames = [
+		'users','receiving_addresses','transactions','verification_email','attestation_units','rejected_payments',
+		'reward_units','referral_reward_units'
+	];
 	db.query("SELECT name FROM sqlite_master WHERE type='table' AND NAME IN (?)", [arrTableNames], (rows) => {
 		if (rows.length !== arrTableNames.length) {
 			error += texts.errorInitSql();
