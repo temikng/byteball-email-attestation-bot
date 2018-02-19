@@ -1,5 +1,6 @@
 /*jslint node: true */
 'use strict';
+const crypto = require('crypto');
 const constants = require('byteballcore/constants.js');
 const conf = require('byteballcore/conf');
 const db = require('byteballcore/db');
@@ -359,21 +360,39 @@ function handleTransactionsBecameStable(arrUnits) {
 						/**
 						 * create and send verification code to attestation email
 						 */
-						const verificationCode = Math.random().toString().slice(2,8);
-						db.query(
-							`INSERT INTO verification_emails 
+						randomCryptoString(6, (err, verificationCode) => {
+							if (err) {
+								return notifications.notifyAdmin('random crypto string', err);
+							}
+
+							db.query(
+								`INSERT INTO verification_emails 
 							(transaction_id, user_email, code) 
 							VALUES(?,?,?)`,
-							[row.transaction_id, row.user_email, verificationCode],
-							() => {
-								notifyByEmailAndMarkIsSent(row.user_email, verificationCode, row.transaction_id, row.device_address);
-							}
-						);
+								[row.transaction_id, row.user_email, verificationCode],
+								() => {
+									notifyByEmailAndMarkIsSent(row.user_email, verificationCode, row.transaction_id, row.device_address);
+								}
+							);
+						});
 					}
 				);
 			});
 		}
 	);
+}
+
+function randomCryptoString(lenOfStr, cb) {
+	if (lenOfStr < 1) throw new Error('the string must contain minimum 1 letter or more');
+	crypto.randomBytes(Math.ceil(5 / 2), (err, buf) => {
+		if (err) return cb(err);
+		let strHex = buf.toString('hex');
+		if (strHex.length === lenOfStr) {
+			cb(null, strHex);
+		} else {
+			cb(null, strHex.substring(0, lenOfStr));
+		}
+	});
 }
 
 function notifyByEmailAndMarkIsSent(user_email, code, transaction_id, device_address) {
