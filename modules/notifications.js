@@ -2,56 +2,38 @@
 'use strict';
 const conf = require('byteballcore/conf.js');
 const mail = require('byteballcore/mail.js');
-const nodemailer = require('nodemailer');
+const emailjs = require('emailjs');
 
-let transporter;
+let server;
 
 if (conf.bUseSmtp) {
-	const port = conf.smtpPort ? Number(conf.smtpPort) : 465;
-	const transporterOptions = {
+	server = emailjs.server.connect({
+		user: conf.smtpUser,
+		password: conf.smtpPassword,
 		host: conf.smtpHost,
-		port,
-		secure: port === 465, // true for 465, false for other ports
-		auth: {
-			user: conf.smtpUser,
-			pass: conf.smtpPassword
-		}
-	};
-	transporter = nodemailer.createTransport(transporterOptions);
+		ssl: true
+	});
 }
 
-function notifyEmail (email, nameTo, subject, body, callback) {
-	if (!callback) callback = function () {};
-	console.log(`notifyEmail:\n${email}\n${subject}\n${body}`);
+function notifyAdmin(subject, body) {
+	console.log('notifyAdmin:\n' + subject + '\n' + body);
 	if (conf.bUseSmtp) {
-		const dataMail = {
-			from: `${conf.from_email_name?conf.from_email_name+' ':''}<${conf.from_email}>`,
-			to: `${nameTo?nameTo+' ':''}<${email}>`,
-			subject: subject,
+		server.send({
 			text: body,
-			html: body
-		};
-		transporter.sendMail(dataMail, (err, info) => {
-			if (err) {
-				return callback(err);
-			}
-			callback(null, info);
+			from: 'Server <' + conf.from_email + '>',
+			to: 'You <' + conf.admin_email + '>',
+			subject: subject
+		}, function (err) {
+			if (err) console.error(new Error(err));
 		});
 	} else {
 		mail.sendmail({
+			to: conf.admin_email,
 			from: conf.from_email,
-			to: email,
 			subject: subject,
 			body: body
-		}, callback);
+		});
 	}
 }
 
-function notifyAdmin (subject, body, callback) {
-	notifyEmail(conf.admin_email, 'You', subject, body, callback);
-}
-
-module.exports = {
-	notifyEmail,
-	notifyAdmin
-};
+exports.notifyAdmin = notifyAdmin;

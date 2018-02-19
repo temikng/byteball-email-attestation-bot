@@ -6,6 +6,7 @@ const conf = require('byteballcore/conf');
 const db = require('byteballcore/db');
 const eventBus = require('byteballcore/event_bus');
 const validationUtils = require('byteballcore/validation_utils');
+const mail = require('byteballcore/mail');
 const headlessWallet = require('headless-byteball');
 const texts = require('./modules/texts');
 const reward = require('./modules/reward');
@@ -66,7 +67,7 @@ function handleWalletReady() {
 		/**
 		 * check if config is filled correct
 		 */
-		if (conf.useSmtp && (!conf.smtpHost || !conf.smtpUser || !conf.smtpPassword)) {
+		if (conf.bUseSmtp && (!conf.smtpHost || !conf.smtpUser || !conf.smtpPassword)) {
 			error += texts.errorConfigSmtp();
 		}
 		if (!conf.admin_email || !conf.from_email) {
@@ -397,27 +398,28 @@ function randomCryptoString(lenOfStr, cb) {
 
 function notifyByEmailAndMarkIsSent(user_email, code, transaction_id, device_address) {
 	let device = require('byteballcore/device.js');
-	notifications.notifyEmail(
-		user_email,
-		null,
-		texts.emailSubjectEmailAttestation(),
-		texts.emailBodyEmailAttestation(code),
-		(err) => {
-			if (err) {
-				return console.error(err);
-			}
-
-			db.query(
-				`UPDATE verification_emails 
-				SET is_sent=?
-				WHERE transaction_id=? AND user_email=?`,
-				[1, transaction_id, user_email],
-				() => {
-					device.sendMessageToDevice(device_address, 'text', texts.emailWasSent(user_email));
-				}
-			);
+	mail.sendmail({
+		from: `${conf.from_email_name ? conf.from_email_name + ' ' : ''}<${conf.from_email}>`,
+		to: user_email,
+		subject: texts.emailSubjectEmailAttestation(),
+		text: texts.emailPlainBodyEmailAttestation(code),
+		html: texts.emailBodyEmailAttestation(code)
+	}, (err) => {
+		if (err) {
+			console.error(err);
+			return notifications.notifyAdmin('failed to send mail', `failed to send mail to ${user_email}: ${err}`);
 		}
-	);
+
+		db.query(
+			`UPDATE verification_emails 
+			SET is_sent=?
+			WHERE transaction_id=? AND user_email=?`,
+			[1, transaction_id, user_email],
+			() => {
+				device.sendMessageToDevice(device_address, 'text', texts.emailWasSent(user_email));
+			}
+		);
+	});
 }
 
 /**

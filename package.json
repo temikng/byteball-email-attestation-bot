@@ -12,7 +12,6 @@
     "byteballcore": "git+https://github.com/byteball/byteballcore.git",
     "emailjs": "^2.0.0",
     "express": "^4.16.2",
-    "headless-byteball": "git+https://github.com/byteball/headless-byteball.git",
-    "nodemailer": "^4.4.2"
+    "headless-byteball": "git+https://github.com/byteball/headless-byteball.git"
   }
 }

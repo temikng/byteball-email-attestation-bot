@@ -23,11 +23,7 @@ exports.bStaticChangeAddress = true;
 exports.KEYS_FILENAME = 'keys.json';
 
 // smtp
-exports.bUseSmtp = true;
-exports.smtpHost = '';
-exports.smtpUser = '';
-exports.smtpPort = 465;
-exports.smtpPassword = '';
+exports.bUseSmtp = false;
 
 // emails
 exports.admin_email = '';

@@ -141,6 +141,12 @@ exports.previousAttestationFailed = () => {
 exports.emailSubjectEmailAttestation = () => {
 	return "Email verification";
 };
+exports.emailPlainBodyEmailAttestation = (verificationCode) => {
+	return [
+		`Your verification code is ${verificationCode}\n`,
+		`Enter this code to chat with "${conf.deviceName}"`,
+	].join('');
+};
 exports.emailBodyEmailAttestation = (verificationCode) => {
 	return [
 		`<p>Your verification code is <h3>${verificationCode}</h3></p>`,
