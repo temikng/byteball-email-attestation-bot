@@ -379,195 +379,202 @@ function respond (from_address, text, response = '') {
 						);
 					}
 
-					mutex.lock([userInfo.user_address], (unlock) => {
-
-						db.query(
-							`SELECT
-								code, result, number_of_attempts, 
-								transaction_id, is_confirmed, received_amount,
-								attestation_date, user_address
-							FROM transactions
-							JOIN receiving_addresses USING(receiving_address)
-							LEFT JOIN verification_emails USING(transaction_id, user_email)
-							LEFT JOIN attestation_units USING(transaction_id)
-							WHERE receiving_address=?
-							ORDER BY transaction_id DESC
-							LIMIT 1`,
-							[receiving_address],
-							(rows) => {
-								/**
-								 * if user didn't pay yet
-								 */
-								if (rows.length === 0) {
-									unlock();
-
-									return device.sendMessageToDevice(
-										from_address,
-										'text',
-										(response ? response + '\n\n' : '') + texts.pleasePayOrPrivacy(receiving_address, price, post_publicly)
-									);
-								}
-
-								let row = rows[0];
-								let transaction_id = row.transaction_id;
-
-								/**
-								 * if user payed, but transaction did not become stable
-								 */
-								if (row.is_confirmed === 0) {
-									unlock();
-
-									return device.sendMessageToDevice(
-										from_address,
-										'text',
-										(response ? response + '\n\n' : '') + texts.receivedYourPayment(row.received_amount)
-									);
-								}
-
-								let verification_email_result = row.result;
-								/**
-								 * if user still did not enter correct verification code
-								 */
-								if (verification_email_result === null) {
-
-									/**
-									 * if user enter correct verification code
-									 */
-									if (text === row.code) {
-
-										return db.query(
-											`UPDATE verification_emails 
-											SET result=?, result_date=${db.getNow()}
-											WHERE transaction_id=? AND user_email=?`,
-											[1, transaction_id, userInfo.user_email],
-											() => {
-
-												db.query(
-													`INSERT ${db.getIgnore()} INTO attestation_units 
-													(transaction_id) 
-													VALUES (?)`,
-													[transaction_id],
-													() => {
-														unlock();
-
-														device.sendMessageToDevice(
-															from_address,
-															'text',
-															(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
-														);
-													}
-												);
-
-											}
-										);
-
-									} else if (text === 'send email again') {
-										unlock();
-										/**
-										 * user wants to receive email again
-										 */
-										return db.query(
-											`UPDATE verification_emails 
-											SET is_sent=?
-											WHERE transaction_id=? AND user_email=?`,
-											[0, row.transaction_id, userInfo.user_email],
-											() => {
-												sendVerificationCodeByEmailAndMarkIsSent(userInfo.user_email, row.code, row.transaction_id, from_address);
-											}
-										);
-
-									} else {
-										/**
-										 * user enters wrong verification code
-										 */
-										let currNumberAttempts = Number(row.number_of_attempts) + 1;
-										let leftNumberAttempts = conf.MAX_ATTEMPTS - currNumberAttempts;
-
-										response = (response ? response + '\n\n' : '') + texts.wrongVerificationCode(leftNumberAttempts);
-
-										if (leftNumberAttempts > 0) {
-											return db.query(
-												`UPDATE verification_emails 
-												SET number_of_attempts=? 
-												WHERE transaction_id=? AND user_email=?`,
-												[currNumberAttempts, row.transaction_id, userInfo.user_email],
-												() => {
-													unlock();
-
-													device.sendMessageToDevice(
-														from_address,
-														'text',
-														(response ? response + '\n\n' : '') + texts.emailWasSent(userInfo.user_email)
-													);
-
-												}
-											);
-										} else {
-											/**
-											 * no more chance, attestation is failed
-											 */
-											return db.query(
-												`UPDATE verification_emails 
-												SET number_of_attempts=?, result=?, result_date=${db.getNow()}
-												WHERE transaction_id=? AND user_email=?`,
-												[currNumberAttempts, 0, row.transaction_id, userInfo.user_email],
-												() => {
-													unlock();
-
-													device.sendMessageToDevice(
-														from_address,
-														'text',
-														(response ? response + '\n\n' : '') + texts.currentAttestationFailed()
-													);
-
-												}
-											);
-										} // no more chance, attestation is failed
-
-									} // user enters wrong verification code
-
-								} // if user still did not enter correct verification code
-
-								/**
-								 * previous attestation was failed
-								 */
-								if (verification_email_result === 0) {
-									unlock();
-
-									return device.sendMessageToDevice(
-										from_address,
-										'text',
-										(response ? response + '\n\n' : '') + texts.previousAttestationFailed()
-									);
-								}
-
-								/**
-								 * email is in attestation
-								 */
-								if (!row.attestation_date) {
-									unlock();
-
-									return device.sendMessageToDevice(
-										from_address,
-										'text',
-										(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
-									);
-								}
-
-								unlock();
-
-								/**
-								 * no more available commands, user email is attested
-								 */
+					db.query(
+						`SELECT
+							transaction_id, is_confirmed, received_amount, user_address
+						FROM transactions
+						JOIN receiving_addresses USING(receiving_address)
+						WHERE receiving_address=?
+						ORDER BY transaction_id DESC
+						LIMIT 1`,
+						[receiving_address],
+						(rows) => {
+							/**
+							 * if user didn't pay yet
+							 */
+							if (rows.length === 0) {
 								return device.sendMessageToDevice(
 									from_address,
 									'text',
-									(response ? response + '\n\n' : '') + texts.alreadyAttested(row.attestation_date)
+									(response ? response + '\n\n' : '') + texts.pleasePayOrPrivacy(receiving_address, price, post_publicly)
 								);
 							}
-						);
 
-					}); // mutex.lock userInfo.user_address
+							let row = rows[0];
+							let transaction_id = row.transaction_id;
+
+							/**
+							 * if user payed, but transaction did not become stable
+							 */
+							if (row.is_confirmed === 0) {
+								return device.sendMessageToDevice(
+									from_address,
+									'text',
+									(response ? response + '\n\n' : '') + texts.receivedYourPayment(row.received_amount)
+								);
+							}
+
+							mutex.lock(['tx-'+transaction_id], (unlock) => {
+								db.query(
+									`SELECT
+										code, result, number_of_attempts, 
+										attestation_date
+									FROM transactions
+									JOIN receiving_addresses USING(receiving_address)
+									LEFT JOIN verification_emails USING(transaction_id, user_email)
+									LEFT JOIN attestation_units USING(transaction_id)
+									WHERE receiving_address=? AND transaction_id=?
+									LIMIT 1`,
+									[receiving_address, transaction_id],
+									(rows) => {
+										let row = rows[0];
+
+										let verification_email_result = row.result;
+										/**
+										 * if user still did not enter correct verification code
+										 */
+										if (verification_email_result === null) {
+
+											/**
+											 * if user enter correct verification code
+											 */
+											if (text === row.code) {
+
+												return db.query(
+													`UPDATE verification_emails 
+													SET result=?, result_date=${db.getNow()}
+													WHERE transaction_id=? AND user_email=?`,
+													[1, transaction_id, userInfo.user_email],
+													() => {
+
+														db.query(
+															`INSERT ${db.getIgnore()} INTO attestation_units 
+															(transaction_id) 
+															VALUES (?)`,
+															[transaction_id],
+															() => {
+																unlock();
+
+																device.sendMessageToDevice(
+																	from_address,
+																	'text',
+																	(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
+																);
+															}
+														);
+
+													}
+												);
+
+											} else if (text === 'send email again') {
+												unlock();
+												/**
+												 * user wants to receive email again
+												 */
+												return db.query(
+													`UPDATE verification_emails 
+													SET is_sent=?
+													WHERE transaction_id=? AND user_email=?`,
+													[0, transaction_id, userInfo.user_email],
+													() => {
+														sendVerificationCodeByEmailAndMarkIsSent(userInfo.user_email, row.code, transaction_id, from_address);
+													}
+												);
+
+											} else {
+												/**
+												 * user enters wrong verification code
+												 */
+												let currNumberAttempts = Number(row.number_of_attempts) + 1;
+												let leftNumberAttempts = conf.MAX_ATTEMPTS - currNumberAttempts;
+
+												response = (response ? response + '\n\n' : '') + texts.wrongVerificationCode(leftNumberAttempts);
+
+												if (leftNumberAttempts > 0) {
+													return db.query(
+														`UPDATE verification_emails 
+														SET number_of_attempts=? 
+														WHERE transaction_id=? AND user_email=?`,
+														[currNumberAttempts, transaction_id, userInfo.user_email],
+														() => {
+															unlock();
+
+															device.sendMessageToDevice(
+																from_address,
+																'text',
+																(response ? response + '\n\n' : '') + texts.emailWasSent(userInfo.user_email)
+															);
+
+														}
+													);
+												} else {
+													/**
+													 * no more chance, attestation is failed
+													 */
+													return db.query(
+														`UPDATE verification_emails 
+														SET number_of_attempts=?, result=?, result_date=${db.getNow()}
+														WHERE transaction_id=? AND user_email=?`,
+														[currNumberAttempts, 0, transaction_id, userInfo.user_email],
+														() => {
+															unlock();
+
+															device.sendMessageToDevice(
+																from_address,
+																'text',
+																(response ? response + '\n\n' : '') + texts.currentAttestationFailed()
+															);
+
+														}
+													);
+												} // no more chance, attestation is failed
+
+											} // user enters wrong verification code
+
+										} // if user still did not enter correct verification code
+
+										/**
+										 * previous attestation was failed
+										 */
+										if (verification_email_result === 0) {
+											unlock();
+
+											return device.sendMessageToDevice(
+												from_address,
+												'text',
+												(response ? response + '\n\n' : '') + texts.previousAttestationFailed()
+											);
+										}
+
+										/**
+										 * email is in attestation
+										 */
+										if (!row.attestation_date) {
+											unlock();
+
+											return device.sendMessageToDevice(
+												from_address,
+												'text',
+												(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
+											);
+										}
+
+										unlock();
+
+										/**
+										 * no more available commands, user email is attested
+										 */
+										return device.sendMessageToDevice(
+											from_address,
+											'text',
+											(response ? response + '\n\n' : '') + texts.alreadyAttested(row.attestation_date)
+										);
+									}
+								);
+							}); // mutex.lock userInfo.user_address
+
+						}
+					);
 
 				});
 			});
