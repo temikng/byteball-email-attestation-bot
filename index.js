@@ -184,7 +184,7 @@ function handleNewTransactions(arrUnits) {
 						return db.query(
 							`INSERT ${db.getIgnore()} INTO rejected_payments
 							(receiving_address, price, received_amount, payment_unit, error)
-							VALUES (?,?,?,?,?,?)`,
+							VALUES (?,?,?,?,?)`,
 							[row.receiving_address, row.price, row.amount, row.unit, error],
 							() => {
 								device.sendMessageToDevice(row.device_address, 'text', error);
@@ -399,13 +399,12 @@ function respond (from_address, text, response = '') {
 								 * if user didn't pay yet
 								 */
 								if (rows.length === 0) {
+									unlock();
+
 									return device.sendMessageToDevice(
 										from_address,
 										'text',
-										(response ? response + '\n\n' : '') + texts.pleasePayOrPrivacy(receiving_address, price, post_publicly),
-										() => {
-											unlock();
-										}
+										(response ? response + '\n\n' : '') + texts.pleasePayOrPrivacy(receiving_address, price, post_publicly)
 									);
 								}
 
@@ -416,13 +415,12 @@ function respond (from_address, text, response = '') {
 								 * if user payed, but transaction did not become stable
 								 */
 								if (row.is_confirmed === 0) {
+									unlock();
+
 									return device.sendMessageToDevice(
 										from_address,
 										'text',
-										(response ? response + '\n\n' : '') + texts.receivedYourPayment(row.received_amount),
-										() => {
-											unlock();
-										}
+										(response ? response + '\n\n' : '') + texts.receivedYourPayment(row.received_amount)
 									);
 								}
 
@@ -437,27 +435,25 @@ function respond (from_address, text, response = '') {
 									 */
 									if (text === row.code) {
 
-										db.query(
+										return db.query(
 											`UPDATE verification_emails 
-										SET result=?, result_date=${db.getNow()}
-										WHERE transaction_id=? AND user_email=?`,
+											SET result=?, result_date=${db.getNow()}
+											WHERE transaction_id=? AND user_email=?`,
 											[1, transaction_id, userInfo.user_email],
 											() => {
 
 												db.query(
 													`INSERT ${db.getIgnore()} INTO attestation_units 
-												(transaction_id) 
-												VALUES (?)`,
+													(transaction_id) 
+													VALUES (?)`,
 													[transaction_id],
 													() => {
+														unlock();
 
 														device.sendMessageToDevice(
 															from_address,
 															'text',
-															(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email),
-															() => {
-																unlock();
-															}
+															(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
 														);
 													}
 												);
@@ -466,13 +462,14 @@ function respond (from_address, text, response = '') {
 										);
 
 									} else if (text === 'send email again') {
+										unlock();
 										/**
 										 * user wants to receive email again
 										 */
-										db.query(
+										return db.query(
 											`UPDATE verification_emails 
-										SET is_sent=?
-										WHERE transaction_id=? AND user_email=?`,
+											SET is_sent=?
+											WHERE transaction_id=? AND user_email=?`,
 											[0, row.transaction_id, userInfo.user_email],
 											() => {
 												sendVerificationCodeByEmailAndMarkIsSent(userInfo.user_email, row.code, row.transaction_id, from_address);
@@ -489,20 +486,18 @@ function respond (from_address, text, response = '') {
 										response = (response ? response + '\n\n' : '') + texts.wrongVerificationCode(leftNumberAttempts);
 
 										if (leftNumberAttempts > 0) {
-											db.query(
+											return db.query(
 												`UPDATE verification_emails 
-											SET number_of_attempts=? 
-											WHERE transaction_id=? AND user_email=?`,
+												SET number_of_attempts=? 
+												WHERE transaction_id=? AND user_email=?`,
 												[currNumberAttempts, row.transaction_id, userInfo.user_email],
 												() => {
+													unlock();
 
 													device.sendMessageToDevice(
 														from_address,
 														'text',
-														(response ? response + '\n\n' : '') + texts.emailWasSent(userInfo.user_email),
-														() => {
-															unlock();
-														}
+														(response ? response + '\n\n' : '') + texts.emailWasSent(userInfo.user_email)
 													);
 
 												}
@@ -511,20 +506,18 @@ function respond (from_address, text, response = '') {
 											/**
 											 * no more chance, attestation is failed
 											 */
-											db.query(
+											return db.query(
 												`UPDATE verification_emails 
-											SET number_of_attempts=?, result=?, result_date=${db.getNow()}
-											WHERE transaction_id=? AND user_email=?`,
+												SET number_of_attempts=?, result=?, result_date=${db.getNow()}
+												WHERE transaction_id=? AND user_email=?`,
 												[currNumberAttempts, 0, row.transaction_id, userInfo.user_email],
 												() => {
+													unlock();
 
 													device.sendMessageToDevice(
 														from_address,
 														'text',
-														(response ? response + '\n\n' : '') + texts.currentAttestationFailed(),
-														() => {
-															unlock();
-														}
+														(response ? response + '\n\n' : '') + texts.currentAttestationFailed()
 													);
 
 												}
@@ -539,13 +532,12 @@ function respond (from_address, text, response = '') {
 								 * previous attestation was failed
 								 */
 								if (verification_email_result === 0) {
+									unlock();
+
 									return device.sendMessageToDevice(
 										from_address,
 										'text',
-										(response ? response + '\n\n' : '') + texts.previousAttestationFailed(),
-										() => {
-											unlock();
-										}
+										(response ? response + '\n\n' : '') + texts.previousAttestationFailed()
 									);
 								}
 
@@ -553,26 +545,16 @@ function respond (from_address, text, response = '') {
 								 * email is in attestation
 								 */
 								if (!row.attestation_date) {
+									unlock();
+
 									return device.sendMessageToDevice(
 										from_address,
 										'text',
-										(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email),
-										() => {
-											unlock();
-										}
+										(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
 									);
 								}
 
-								if (text === 'req') {
-									return device.sendMessageToDevice(
-										from_address,
-										'text',
-										(response ? response + '\n\n' : '') + "test req [req](profile-request:email)",
-										() => {
-											unlock();
-										}
-									);
-								}
+								unlock();
 
 								/**
 								 * no more available commands, user email is attested
@@ -580,10 +562,7 @@ function respond (from_address, text, response = '') {
 								return device.sendMessageToDevice(
 									from_address,
 									'text',
-									(response ? response + '\n\n' : '') + texts.alreadyAttested(row.attestation_date),
-									() => {
-										unlock();
-									}
+									(response ? response + '\n\n' : '') + texts.alreadyAttested(row.attestation_date)
 								);
 							}
 						);
