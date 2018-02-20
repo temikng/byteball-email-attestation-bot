@@ -4,8 +4,11 @@ const conf = require('byteballcore/conf');
 const objectHash = require('byteballcore/object_hash.js');
 const db = require('byteballcore/db');
 const notifications = require('./notifications');
+const texts = require('./texts');
 
-function retryPostingAttestations(callbackRowAttestation) {
+function retryPostingAttestations() {
+	let device = require('byteballcore/device.js');
+	let reward = require('./reward');
 	db.query(
 		`SELECT 
 			transaction_id, 
@@ -21,10 +24,93 @@ function retryPostingAttestations(callbackRowAttestation) {
 				// console.error(attestation);
 				// console.error(src_profile);
 				postAndWriteAttestation(row.transaction_id, exports.emailAttestorAddress, attestation, src_profile, (err, unit) => {
-					if (err) {
-						return callbackRowAttestation(err);
-					}
-					callbackRowAttestation(null, row.transaction_id, row.user_address, unit);
+					if (err) return;
+					if (!unit) return; // already posted
+
+					db.query(
+						`SELECT
+							COUNT(*) AS count
+						FROM receiving_addresses
+						JOIN transactions USING(receiving_address)
+						LEFT JOIN verification_emails USING(transaction_id, user_email)
+						LEFT JOIN attestation_units USING(transaction_id)
+						WHERE user_address = ? 
+							AND verification_emails.result = 1 
+							AND attestation_units.attestation_unit IS NOT NULL`,
+						[row.user_address],
+						(rows) => {
+							let row = rows[0];
+							// console.error('row.count: ' + row.count);
+							if (row.count > 1) return; // this is not first time
+
+							db.query(
+								`SELECT
+									user_email, post_publicly, device_address, 
+									payment_unit
+								FROM receiving_addresses
+								JOIN transactions USING(receiving_address)
+								WHERE transaction_id=? AND user_address=?`,
+								[row.transaction_id, row.user_address],
+								(rows) => {
+									let row = rows[0];
+
+									if (conf.rewardInBytes) {
+										let rewardInBytes = conf.rewardInBytes;
+										db.query(
+											`INSERT ${db.getIgnore()} INTO reward_units
+											(transaction_id, user_address, user_id, reward)
+											VALUES (?,?,?,?)`,
+											[row.transaction_id, row.user_address, attestation.profile.user_id, rewardInBytes],
+											(res) => {
+												// console.error(`reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
+												if (!res.affectedRows) {
+													return console.log(`duplicate user_address or user_id: ${row.user_address}, ${attestation.profile.user_id}`);
+												}
+
+												device.sendMessageToDevice(row.device_address, 'text', texts.attestedSuccessFirstTimeBonus(rewardInBytes));
+												reward.sendAndWriteReward('attestation', row.transaction_id);
+
+												if (conf.referralRewardInBytes) {
+													let referralRewardInBytes = conf.referralRewardInBytes;
+													reward.findReferral(row.payment_unit, (referring_user_id, referring_user_address, referring_user_device_address) => {
+														if (!referring_user_address) {
+															// console.error("no referring user for " + row.user_address);
+															return console.log("no referring user for " + row.user_address);
+														}
+
+														db.query(
+															`INSERT ${db.getIgnore()} INTO referral_reward_units
+															(transaction_id, user_address, user_id, new_user_address, new_user_id, reward)
+															VALUES (?, ?,?, ?,?, ?)`,
+															[transaction_id,
+																referring_user_address, referring_user_id,
+																row.user_address, attestation.profile.user_id,
+																referralRewardInBytes],
+															(res) => {
+																console.log(`referral_reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
+																if (!res.affectedRows) {
+																	return notifications.notifyAdmin(
+																		"duplicate referral reward",
+																		`referral reward for new user ${row.user_address} ${attestation.profile.user_id} already written`
+																	);
+																}
+
+																device.sendMessageToDevice(referring_user_device_address, 'text', texts.referredUserBonus(conf.referralRewardInBytes));
+																reward.sendAndWriteReward('referral', row.transaction_id);
+															}
+														);
+													});
+												}
+											}
+										);
+									}
+
+								}
+							);
+
+						}
+					);
+
 				});
 			});
 		}

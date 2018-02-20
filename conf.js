@@ -39,6 +39,5 @@ exports.priceInBytes = 4000;
 exports.rewardInBytes = 10;
 exports.referralRewardInBytes = 10;
 
-exports.PRICE_TIMEOUT = 3600; // in seconds
 exports.MAX_REFERRAL_DEPTH = 5;
 exports.MAX_ATTEMPTS = 5;

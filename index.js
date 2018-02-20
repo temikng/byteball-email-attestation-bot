@@ -1,6 +1,5 @@
 /*jslint node: true */
 'use strict';
-const crypto = require('crypto');
 const constants = require('byteballcore/constants.js');
 const conf = require('byteballcore/conf');
 const db = require('byteballcore/db');
@@ -12,6 +11,7 @@ const texts = require('./modules/texts');
 const reward = require('./modules/reward');
 const emailAttestation = require('./modules/attestation');
 const notifications = require('./modules/notifications');
+const randomCryptoString = require('./modules/random-crypto-string');
 
 /**
  * user pairs his device with bot
@@ -90,7 +90,7 @@ function handleWalletReady() {
 			// 	console.log('== distribution address: ' + address2);
 			// 	reward.distributionAddress = address2;
 
-				setInterval(retryPostingAttestations, 10*1000);
+				setInterval(emailAttestation.retryPostingAttestations, 10*1000);
 				setInterval(reward.retrySendingRewards, 10*1000);
 				setInterval(retrySendingEmails, 60*1000);
 				setInterval(moveFundsToAttestorAddresses, 60*1000);
@@ -142,105 +142,6 @@ function moveFundsToAttestorAddresses() {
 	);
 }
 
-function retryPostingAttestations() {
-	let device = require('byteballcore/device.js');
-	emailAttestation.retryPostingAttestations((err, transaction_id, user_address, unit) => {
-		if (err) return;
-
-		// console.error('retryPostingAttestationsRow');
-		// console.error(transaction_id, unit);
-
-		if (!unit) return; // already posted
-
-		db.query(
-			`SELECT
-				COUNT(*) AS count
-			FROM receiving_addresses
-			JOIN transactions USING(receiving_address)
-			LEFT JOIN verification_emails USING(transaction_id, user_email)
-			LEFT JOIN attestation_units USING(transaction_id)
-			WHERE user_address = ? 
-				AND verification_emails.result = 1 
-				AND attestation_units.attestation_unit IS NOT NULL`,
-			[user_address],
-			(rows) => {
-				let row = rows[0];
-				// console.error('row.count: ' + row.count);
-				if (row.count > 1) return; // this is not first time
-
-				db.query(
-					`SELECT
-						user_email, post_publicly, device_address, 
-						payment_unit
-					FROM receiving_addresses
-					JOIN transactions USING(receiving_address)
-					WHERE transaction_id=? AND user_address=?`,
-					[transaction_id, user_address],
-					(rows) => {
-						let row = rows[0];
-
-						let [attestationPayload, src_profile] = emailAttestation.getAttestationPayloadAndSrcProfile(user_address, row.user_email, row.post_publicly);
-
-						if (conf.rewardInBytes) {
-							let rewardInBytes = conf.rewardInBytes;
-							db.query(
-								`INSERT ${db.getIgnore()} INTO reward_units
-								(transaction_id, user_address, user_id, reward)
-								VALUES (?,?,?,?)`,
-								[transaction_id, user_address, attestationPayload.profile.user_id, rewardInBytes],
-								(res) => {
-									// console.error(`reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
-									if (!res.affectedRows) {
-										return console.log(`duplicate user_address or user_id: ${user_address}, ${attestationPayload.profile.user_id}`);
-									}
-
-									device.sendMessageToDevice(row.device_address, 'text', texts.attestedSuccessFirstTimeBonus(rewardInBytes));
-									reward.sendAndWriteReward('attestation', transaction_id);
-
-									if (conf.referralRewardInBytes) {
-										let referralRewardInBytes = conf.referralRewardInBytes;
-										reward.findReferral(row.payment_unit, (referring_user_id, referring_user_address, referring_user_device_address) => {
-											if (!referring_user_address) {
-												// console.error("no referring user for " + user_address);
-												return console.log("no referring user for " + user_address);
-											}
-
-											db.query(
-												`INSERT ${db.getIgnore()} INTO referral_reward_units
-												(transaction_id, user_address, user_id, new_user_address, new_user_id, reward)
-												VALUES (?, ?,?, ?,?, ?)`,
-												[transaction_id,
-													referring_user_address, referring_user_id,
-													user_address, attestationPayload.profile.user_id,
-													referralRewardInBytes],
-												(res) => {
-													console.log(`referral_reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
-													if (!res.affectedRows) {
-														return notifications.notifyAdmin(
-															"duplicate referral reward",
-															`referral reward for new user ${user_address} ${attestationPayload.profile.user_id} already written`
-														);
-													}
-
-													device.sendMessageToDevice(referring_user_device_address, 'text', `You referred a user who has just verified his identity and you will receive a reward of ${conf.referralRewardInBytes} Bytes from Byteball distribution fund. Thank you for bringing in a new byteballer, the value of the ecosystem grows with each new user!`);
-													reward.sendAndWriteReward('referral', transaction_id);
-												}
-											);
-										});
-									}
-								}
-							);
-						}
-
-					}
-				);
-
-			}
-		);
-
-	});
-}
-
 function retrySendingEmails() {
 	db.query(
 		`SELECT 
@@ -253,7 +154,7 @@ function retrySendingEmails() {
 		ORDER BY verification_emails.creation_date ASC`,
 		(rows) => {
 			rows.forEach((row) => {
-				notifyByEmailAndMarkIsSent(row.user_email, row.code, row.transaction_id, row.device_address);
+				sendVerificationCodeByEmailAndMarkIsSent(row.user_email, row.code, row.transaction_id, row.device_address);
 			});
 		}
 	);
@@ -278,13 +179,13 @@ function handleNewTransactions(arrUnits) {
 		[arrUnits],
 		(rows) => {
 			rows.forEach((row) => {
-				checkPayment(row, (error, delay) => {
+				checkPayment(row, (error) => {
 					if (error) {
 						return db.query(
 							`INSERT ${db.getIgnore()} INTO rejected_payments
-							(receiving_address, price, received_amount, delay, payment_unit, error)
+							(receiving_address, price, received_amount, payment_unit, error)
 							VALUES (?,?,?,?,?,?)`,
-							[row.receiving_address, row.price, row.amount, delay, row.unit, error],
+							[row.receiving_address, row.price, row.amount, row.unit, error],
 							() => {
 								device.sendMessageToDevice(row.device_address, 'text', error);
 							}
@@ -307,33 +208,24 @@ function handleNewTransactions(arrUnits) {
 }
 
 function checkPayment(row, onDone) {
-	let delay = Math.round(Date.now()/1000 - row.price_ts);
-	let bLate = (delay > conf.PRICE_TIMEOUT);
 	if (row.asset !== null) {
-		return onDone("Received payment in wrong asset", delay);
+		return onDone("Received payment in wrong asset");
 	}
-	let current_price = conf.priceInBytes;
-	let expected_amount = bLate ? current_price : row.price;
-	if (row.amount < expected_amount) {
-		//updatePrice(row.device_address, current_price);
-		let text = `Received ${row.amount} Bytes from you`;
-		text += bLate
-			? ". Your payment is too late and less than the current price."
-			: `, which is less than the expected ${row.price} Bytes.`;
-		return onDone(text + '\n\n' + texts.pleasePay(row.receiving_address, current_price), delay);
+
+	if (row.amount < row.price) {
+		let text = `Received ${row.amount} Bytes from you, which is less than the expected ${row.price} Bytes.`;
+		return onDone(text + '\n\n' + texts.pleasePay(row.receiving_address, row.price));
 	}
 
 	db.query("SELECT address FROM unit_authors WHERE unit=?", [row.unit], (author_rows) => {
 		if (author_rows.length !== 1) {
 			return onDone(
-				texts.receivedPaymentFromMultipleAddresses() + '\n\n' + texts.pleasePay(row.receiving_address, current_price),
-				delay
+				texts.receivedPaymentFromMultipleAddresses() + '\n\n' + texts.pleasePay(row.receiving_address, row.price)
 			);
 		}
 		if (author_rows[0].address !== row.user_address) {
 			return onDone(
-				texts.receivedPaymentNotFromExpectedAddress(row.user_address) + `\n\n` + texts.pleasePay(row.receiving_address, current_price),
-				delay
+				texts.receivedPaymentNotFromExpectedAddress(row.user_address) + `\n\n` + texts.pleasePay(row.receiving_address, row.price)
 			);
 		}
 		onDone();
@@ -363,21 +255,18 @@ function handleTransactionsBecameStable(arrUnits) {
 						/**
 						 * create and send verification code to attestation email
 						 */
-						generateRandomCryptoString(6, (err, verificationCode) => {
-							if (err) {
-								return notifications.notifyAdmin('random crypto string', err);
-							}
+						const verificationCode = randomCryptoString.generateByLengthSync(6);
 
-							db.query(
-								`INSERT INTO verification_emails 
-								(transaction_id, user_email, code) 
-								VALUES(?,?,?)`,
-								[row.transaction_id, row.user_email, verificationCode],
-								() => {
-									notifyByEmailAndMarkIsSent(row.user_email, verificationCode, row.transaction_id, row.device_address);
-								}
-							);
-						});
+						db.query(
+							`INSERT INTO verification_emails 
+							(transaction_id, user_email, code) 
+							VALUES(?,?,?)`,
+							[row.transaction_id, row.user_email, verificationCode],
+							() => {
+								sendVerificationCodeByEmailAndMarkIsSent(row.user_email, verificationCode, row.transaction_id, row.device_address);
+							}
+						);
+
 					}
 				);
 			});
@@ -385,20 +274,7 @@ function handleTransactionsBecameStable(arrUnits) {
 	);
 }
 
-function generateRandomCryptoString(lenOfStr, cb) {
-	if (lenOfStr < 1) throw new Error('the string must contain minimum 1 letter or more');
-	crypto.randomBytes(Math.ceil(5 / 2), (err, buf) => {
-		if (err) return cb(err);
-		let strHex = buf.toString('hex');
-		if (strHex.length === lenOfStr) {
-			cb(null, strHex);
-		} else {
-			cb(null, strHex.substring(0, lenOfStr));
-		}
-	});
-}
-
-function notifyByEmailAndMarkIsSent(user_email, code, transaction_id, device_address) {
+function sendVerificationCodeByEmailAndMarkIsSent(user_email, code, transaction_id, device_address) {
 	let device = require('byteballcore/device.js');
 	mail.sendmail({
 		from: `${conf.from_email_name ? conf.from_email_name + ' ' : ''}<${conf.from_email}>`,
@@ -432,6 +308,7 @@ function notifyByEmailAndMarkIsSent(user_email, code, transaction_id, device_add
  */
 function respond (from_address, text, response = '') {
 	let device = require('byteballcore/device.js');
+	const mutex = require('byteballcore/mutex.js');
 	readUserInfo(from_address, (userInfo) => {
 
 		function checkUserAddress(onDone) {
@@ -502,169 +379,217 @@ function respond (from_address, text, response = '') {
 						);
 					}
 
-					db.query(
-						`SELECT
-							code, result, number_of_attempts, 
-							transaction_id, is_confirmed, received_amount,
-							attestation_date, user_address
-						FROM transactions
-						JOIN receiving_addresses USING(receiving_address)
-						LEFT JOIN verification_emails USING(transaction_id, user_email)
-						LEFT JOIN attestation_units USING(transaction_id)
-						WHERE receiving_address=?
-						ORDER BY transaction_id DESC
-						LIMIT 1`,
-						[receiving_address],
-						(rows) => {
-							/**
-							 * if user didn't pay yet
-							 */
-							if (rows.length === 0) {
-								return device.sendMessageToDevice(
-									from_address,
-									'text',
-									(response ? response + '\n\n' : '') + texts.pleasePayOrPrivacy(receiving_address, price, post_publicly));
-							}
+					mutex.lock([userInfo.user_address], (unlock) => {
 
-							let row = rows[0];
-							let transaction_id = row.transaction_id;
+						db.query(
+							`SELECT
+								code, result, number_of_attempts, 
+								transaction_id, is_confirmed, received_amount,
+								attestation_date, user_address
+							FROM transactions
+							JOIN receiving_addresses USING(receiving_address)
+							LEFT JOIN verification_emails USING(transaction_id, user_email)
+							LEFT JOIN attestation_units USING(transaction_id)
+							WHERE receiving_address=?
+							ORDER BY transaction_id DESC
+							LIMIT 1`,
+							[receiving_address],
+							(rows) => {
+								/**
+								 * if user didn't pay yet
+								 */
+								if (rows.length === 0) {
+									return device.sendMessageToDevice(
+										from_address,
+										'text',
+										(response ? response + '\n\n' : '') + texts.pleasePayOrPrivacy(receiving_address, price, post_publicly),
+										() => {
+											unlock();
+										}
+									);
+								}
 
-							/**
-							 * if user payed, but transaction did not become stable
-							 */
-							if (row.is_confirmed === 0) {
-								return device.sendMessageToDevice(
-									from_address,
-									'text',
-									(response ? response + '\n\n' : '') + texts.receivedYourPayment(row.received_amount));
-							}
+								let row = rows[0];
+								let transaction_id = row.transaction_id;
 
-							let verification_email_result = row.result;
-							/**
-							 * if user still did not enter correct verification code
-							 */
-							if (verification_email_result === null) {
+								/**
+								 * if user payed, but transaction did not become stable
+								 */
+								if (row.is_confirmed === 0) {
+									return device.sendMessageToDevice(
+										from_address,
+										'text',
+										(response ? response + '\n\n' : '') + texts.receivedYourPayment(row.received_amount),
+										() => {
+											unlock();
+										}
+									);
+								}
 
-								if (text === row.code) {
+								let verification_email_result = row.result;
+								/**
+								 * if user still did not enter correct verification code
+								 */
+								if (verification_email_result === null) {
 
-									return db.query(
-										`UPDATE verification_emails 
+									/**
+									 * if user enter correct verification code
+									 */
+									if (text === row.code) {
+
+										db.query(
+											`UPDATE verification_emails 
 										SET result=?, result_date=${db.getNow()}
 										WHERE transaction_id=? AND user_email=?`,
-										[1, transaction_id, userInfo.user_email],
-										() => {
+											[1, transaction_id, userInfo.user_email],
+											() => {
 
-											db.query(
-												`INSERT ${db.getIgnore()} INTO attestation_units 
+												db.query(
+													`INSERT ${db.getIgnore()} INTO attestation_units 
 												(transaction_id) 
 												VALUES (?)`,
-												[transaction_id],
+													[transaction_id],
+													() => {
+
+														device.sendMessageToDevice(
+															from_address,
+															'text',
+															(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email),
+															() => {
+																unlock();
+															}
+														);
+													}
+												);
+
+											}
+										);
+
+									} else if (text === 'send email again') {
+										/**
+										 * user wants to receive email again
+										 */
+										db.query(
+											`UPDATE verification_emails 
+										SET is_sent=?
+										WHERE transaction_id=? AND user_email=?`,
+											[0, row.transaction_id, userInfo.user_email],
+											() => {
+												sendVerificationCodeByEmailAndMarkIsSent(userInfo.user_email, row.code, row.transaction_id, from_address);
+											}
+										);
+
+									} else {
+										/**
+										 * user enters wrong verification code
+										 */
+										let currNumberAttempts = Number(row.number_of_attempts) + 1;
+										let leftNumberAttempts = conf.MAX_ATTEMPTS - currNumberAttempts;
+
+										response = (response ? response + '\n\n' : '') + texts.wrongVerificationCode(leftNumberAttempts);
+
+										if (leftNumberAttempts > 0) {
+											db.query(
+												`UPDATE verification_emails 
+											SET number_of_attempts=? 
+											WHERE transaction_id=? AND user_email=?`,
+												[currNumberAttempts, row.transaction_id, userInfo.user_email],
 												() => {
 
 													device.sendMessageToDevice(
 														from_address,
 														'text',
-														(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email),
+														(response ? response + '\n\n' : '') + texts.emailWasSent(userInfo.user_email),
+														() => {
+															unlock();
+														}
 													);
+
 												}
 											);
-
-										}
-									);
-								} else if (text === 'send email again') {
-									/**
-									 * user wants to receive email again
-									 */
-									return db.query(
-										`UPDATE verification_emails 
-										SET is_sent=?
-										WHERE transaction_id=? AND user_email=?`,
-										[0, row.transaction_id, userInfo.user_email],
-										() => {
-											notifyByEmailAndMarkIsSent(userInfo.user_email, row.code, row.transaction_id, from_address);
-										}
-									);
-								} else {
-									/**
-									 * user enters wrong verification code
-									 */
-									let currNumberAttempts = Number(row.number_of_attempts) + 1;
-									let leftNumberAttempts = conf.MAX_ATTEMPTS - currNumberAttempts;
-									if (leftNumberAttempts > 0) {
-										db.query(
-											`UPDATE verification_emails 
-											SET number_of_attempts=? 
-											WHERE transaction_id=? AND user_email=?`,
-											[currNumberAttempts, row.transaction_id, userInfo.user_email]
-										);
-									} else {
-										db.query(
-											`UPDATE verification_emails 
+										} else {
+											/**
+											 * no more chance, attestation is failed
+											 */
+											db.query(
+												`UPDATE verification_emails 
 											SET number_of_attempts=?, result=?, result_date=${db.getNow()}
 											WHERE transaction_id=? AND user_email=?`,
-											[currNumberAttempts, 0, row.transaction_id, userInfo.user_email]
-										);
-									}
-									response = (response ? response + '\n\n' : '') + texts.wrongVerificationCode(leftNumberAttempts);
+												[currNumberAttempts, 0, row.transaction_id, userInfo.user_email],
+												() => {
 
-									/**
-									 * no more chance, attestation is failed
-									 */
-									if (leftNumberAttempts === 0) {
-										return device.sendMessageToDevice(
-											from_address,
-											'text',
-											(response ? response + '\n\n' : '') + texts.currentAttestationFailed()
-										);
-									}
+													device.sendMessageToDevice(
+														from_address,
+														'text',
+														(response ? response + '\n\n' : '') + texts.currentAttestationFailed(),
+														() => {
+															unlock();
+														}
+													);
+
+												}
+											);
+										} // no more chance, attestation is failed
+
+									} // user enters wrong verification code
+
+								} // if user still did not enter correct verification code
+
+								/**
+								 * previous attestation was failed
+								 */
+								if (verification_email_result === 0) {
+									return device.sendMessageToDevice(
+										from_address,
+										'text',
+										(response ? response + '\n\n' : '') + texts.previousAttestationFailed(),
+										() => {
+											unlock();
+										}
+									);
 								}
 
+								/**
+								 * email is in attestation
+								 */
+								if (!row.attestation_date) {
+									return device.sendMessageToDevice(
+										from_address,
+										'text',
+										(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email),
+										() => {
+											unlock();
+										}
+									);
+								}
+
+								if (text === 'req') {
+									return device.sendMessageToDevice(
+										from_address,
+										'text',
+										(response ? response + '\n\n' : '') + "test req [req](profile-request:email)",
+										() => {
+											unlock();
+										}
+									);
+								}
+
+								/**
+								 * no more available commands, user email is attested
+								 */
 								return device.sendMessageToDevice(
 									from_address,
 									'text',
-									(response ? response + '\n\n' : '') + texts.emailWasSent(userInfo.user_email)
+									(response ? response + '\n\n' : '') + texts.alreadyAttested(row.attestation_date),
+									() => {
+										unlock();
+									}
 								);
 							}
+						);
 
-							/**
-							 * previous attestation was failed
-							 */
-							if (verification_email_result === 0) {
-								return device.sendMessageToDevice(
-									from_address,
-									'text',
-									(response ? response + '\n\n' : '') + texts.previousAttestationFailed()
-								);
-							}
+					}); // mutex.lock userInfo.user_address
 
-							/**
-							 * email is in attestation
-							 */
-							if (!row.attestation_date) {
-								return device.sendMessageToDevice(
-									from_address,
-									'text',
-									(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
-								);
-							}
-
-							if (text === 'req') {
-								return device.sendMessageToDevice(
-									from_address,
-									'text',
-									(response ? response + '\n\n' : '') + "test req [req](profile-request:email)");
-							}
-
-							/**
-							 * no more available commands, user email is attested
-							 */
-							return device.sendMessageToDevice(
-								from_address,
-								'text',
-								(response ? response + '\n\n' : '') + texts.alreadyAttested(row.attestation_date)
-							);
-						}
-					);
 				});
 			});
 		});

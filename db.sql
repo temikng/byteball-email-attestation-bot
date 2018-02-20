@@ -63,7 +63,6 @@ CREATE TABLE rejected_payments (
 	receiving_address CHAR(32) NOT NULL,
 	price INT NOT NULL,
 	received_amount INT NOT NULL,
-	delay INT NOT NULL,
 	payment_unit CHAR(44) NOT NULL UNIQUE,
 	payment_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	error TEXT NOT NULL,
