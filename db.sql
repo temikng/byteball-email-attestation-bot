@@ -15,6 +15,7 @@ CREATE TABLE receiving_addresses (
 	post_publicly TINYINT NULL,
 	price INT NULL,
 	last_price_date TIMESTAMP NULL,
+	is_requiring_renewal TINYINT NULL DEFAULT 0, -- 1 need, 0 not need
 	UNIQUE (device_address, user_address, user_email),
 	FOREIGN KEY (device_address) REFERENCES correspondent_devices(device_address),
 	FOREIGN KEY (receiving_address) REFERENCES my_addresses(address)
