@@ -3,27 +3,41 @@
 const desktopApp = require('byteballcore/desktop_app.js');
 const conf = require('byteballcore/conf');
 
+const arrListOfWhiteEmails = Object.keys(conf.objRewardWhiteListEmails);
+
 /**
  * responses for clients
  */
-exports.greeting = (strPriceAttestation, strPriceReward) => {
+exports.greeting = () => {
 	return [
-			"Here you can attest your email.\n\n",
+		"Here you can attest your email.\n\n",
 
-			"Your email will be saved privately in your wallet, " +
-			"only a proof of attestation will be posted publicly on the distributed ledger. " +
-			"The very fact of being attested may give you access to some services or tokens, even without disclosing your email. " +
-			"Some apps may request you to reveal of your attested email, you choose what to reveal and to which app.\n\n",
+		"Your email will be saved privately in your wallet, ",
+		"only a proof of attestation will be posted publicly on the distributed ledger. ",
+		"The very fact of being attested may give you access to some services or tokens, even without disclosing your email. ",
+		"Some apps may request you to reveal of your attested email, you choose what to reveal and to which app.\n\n",
 
-			"You may also choose to make your attested email public.\n\n",
+		"You may also choose to make your attested email public.\n\n",
 
-			`The price of attestation is ${conf.priceInBytes} Bytes. ` +
-			"The payment is nonrefundable even if the attestation fails for any reason.\n\n",
+		`The price of attestation is ${conf.priceInBytes} Bytes. `,
+		"The payment is nonrefundable even if the attestation fails for any reason.\n\n",
 
-			"After payment, you will be received email with verification code. Verification code You will need to click at the specified link.\n\n",
+		"After payment, you will be received email with verification code. Verification code You will need to click at the specified link.\n\n",
 
-			`After you successfully verify yourself for the first time, you receive a ${conf.rewardInBytes} Bytes reward.`
-		].join('');
+		`After you successfully verify email for the first time, `,
+		`and if your email corresponds to:\n${arrListOfWhiteEmails.join(';\n')}.\n`,
+		`you receive a $${conf.rewardInUSD.toLocaleString([], {minimumFractionDigits: 2})} reward in Bytes.`
+	].join('');
+};
+
+exports.weHaveReferralProgram = () => {
+	return [
+		"Remember, we have a referral program: " +
+		"if you send Bytes from your attested address to a new user who is not attested yet, " +
+		"and he/she uses those Bytes to pay for a successful attestation, " +
+		`and he/she uses attestation email corresponds to:\n${arrListOfWhiteEmails.join(';\n')}.\n` +
+		`you receive a $${conf.referralRewardInUSD.toLocaleString([], {minimumFractionDigits: 2})} reward in Bytes.`
+	].join('');
 };
 
 exports.insertMyAddress = () => {
@@ -39,11 +53,11 @@ exports.insertMyEmail = () => {
 	return 'Please send me your email that you wish to attest.';
 };
 
-exports.goingAttestAddress = (address) => {
+exports.goingToAttestAddress = (address) => {
 	return `Thanks, going to attest your address: ${address}.`;
 };
 
-exports.goingAttestEmail = (email) => {
+exports.goingToAttestEmail = (email) => {
 	return `Thanks, going to attest your email: ${email}.`;
 };
 
@@ -101,21 +115,27 @@ exports.wrongVerificationCode = (leftNumberOfAttempts) => {
 };
 
 exports.emailWasSent = (emailAddress) => {
-	return `Email was sent to the ${emailAddress}. Enter to the chat verification code, specified in email.\n` +
-		"If you don't receive email, click [send email again](command:send email again).";
-};
-
-exports.attestedSuccessFirstTimeBonus = (bonusInBytes) => {
-	return `You were attested for the first time and will receive a welcome bonus of ${bonusInBytes} Bytes from Byteball distribution fund.`;
-};
-exports.attestedSuccessNextTime = () => {
-	return `You were attested.`;
-};
-
-exports.referredUserBonus = (bonusInBytes) => {
 	return [
-		"You referred a user who has just verified his identity and you will receive ",
-		`a reward of ${bonusInBytes} Bytes from Byteball distribution fund. ` +
+		`Email was sent to the ${emailAddress}. Enter to the chat verification code, specified in email.\n`,
+		"If you don't receive email, click [send email again](command:send email again)."
+	].join('');
+};
+
+exports.attestedSuccessFirstTimeBonus = (rewardInBytes) => {
+	return [
+		"You requested an attestation for the first time and will receive a welcome bonus ",
+		`of $${conf.rewardInUSD.toLocaleString([], {minimumFractionDigits: 2})} `,
+		`(${(rewardInBytes/1e9).toLocaleString([], {maximumFractionDigits: 9})} GB) `,
+		"from Byteball distribution fund."
+	].join('')
+};
+
+exports.referredUserBonus = (referralRewardInBytes) => {
+	return [
+		"You referred a user who has just verified his identity and you will receive a reward ",
+		`of $${conf.referralRewardInUSD.toLocaleString([], {minimumFractionDigits: 2})} `,
+		`(${(referralRewardInBytes/1e9).toLocaleString([], {maximumFractionDigits: 9})} GB) `,
+		"from Byteball distribution fund.\n",
 		"Thank you for bringing in a new byteballer, the value of the ecosystem grows with each new user!"
 	].join('');
 };

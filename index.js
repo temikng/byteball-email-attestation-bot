@@ -9,6 +9,7 @@ const mail = require('byteballcore/mail');
 const headlessWallet = require('headless-byteball');
 const texts = require('./modules/texts');
 const reward = require('./modules/reward');
+const conversion = require('./modules/conversion');
 const emailAttestation = require('./modules/attestation');
 const notifications = require('./modules/notifications');
 const randomCryptoString = require('./modules/random-crypto-string');
@@ -132,7 +133,7 @@ function moveFundsToAttestorAddresses() {
 					console.error("failed to move funds: " + err);
 					let balances = require('byteballcore/balances');
 					balances.readBalance(arrAddresses[0], (balance) => {
-						console.error(balance);
+						console.error('balance', balance);
 						notifications.notifyAdmin('failed to move funds', err + ", balance: " + JSON.stringify(balance));
 					});
 				} else
@@ -154,7 +155,7 @@ function retrySendingEmails() {
 		ORDER BY verification_emails.creation_date ASC`,
 		(rows) => {
 			rows.forEach((row) => {
-				sendVerificationCodeByEmailAndMarkIsSent(row.user_email, row.code, row.transaction_id, row.device_address);
+				sendVerificationCodeToEmailAndMarkIsSent(row.user_email, row.code, row.transaction_id, row.device_address);
 			});
 		}
 	);
@@ -165,7 +166,7 @@ function handleNewTransactions(arrUnits) {
 	db.query(
 		`SELECT
 			amount, asset, unit,
-			receiving_address, device_address, user_address, price, 
+			receiving_address, device_address, user_address, user_email, price, 
 			${db.getUnixTimestamp('last_price_date')} AS price_ts
 		FROM outputs
 		CROSS JOIN receiving_addresses ON receiving_addresses.receiving_address = outputs.address
@@ -179,6 +180,7 @@ function handleNewTransactions(arrUnits) {
 		[arrUnits],
 		(rows) => {
 			rows.forEach((row) => {
+
 				checkPayment(row, (error) => {
 					if (error) {
 						return db.query(
@@ -202,6 +204,7 @@ function handleNewTransactions(arrUnits) {
 						}
 					);
 				});
+
 			});
 		}
 	);
@@ -263,7 +266,7 @@ function handleTransactionsBecameStable(arrUnits) {
 							VALUES(?,?,?)`,
 							[row.transaction_id, row.user_email, verificationCode],
 							() => {
-								sendVerificationCodeByEmailAndMarkIsSent(row.user_email, verificationCode, row.transaction_id, row.device_address);
+								sendVerificationCodeToEmailAndMarkIsSent(row.user_email, verificationCode, row.transaction_id, row.device_address);
 							}
 						);
 
@@ -274,7 +277,7 @@ function handleTransactionsBecameStable(arrUnits) {
 	);
 }
 
-function sendVerificationCodeByEmailAndMarkIsSent(user_email, code, transaction_id, device_address) {
+function sendVerificationCodeToEmailAndMarkIsSent(user_email, code, transaction_id, device_address) {
 	let device = require('byteballcore/device.js');
 	mail.sendmail({
 		from: `${conf.from_email_name ? conf.from_email_name + ' ' : ''}<${conf.from_email}>`,
@@ -314,7 +317,7 @@ function respond (from_address, text, response = '') {
 		function checkUserAddress(onDone) {
 			if (validationUtils.isValidAddress(text)) {
 				userInfo.user_address = text;
-				response += texts.goingAttestAddress(userInfo.user_address);
+				response += texts.goingToAttestAddress(userInfo.user_address);
 				return db.query(
 					'UPDATE users SET user_address=? WHERE device_address=?',
 					[userInfo.user_address, from_address],
@@ -330,7 +333,7 @@ function respond (from_address, text, response = '') {
 		function checkUserEmail(onDone) {
 			if (validationUtils.isValidEmail(text)) {
 				userInfo.user_email = text;
-				response += texts.goingAttestEmail(userInfo.user_email);
+				response += texts.goingToAttestEmail(userInfo.user_email);
 				return db.query(
 					'UPDATE users SET user_email=? WHERE device_address=? AND user_address=?',
 					[userInfo.user_email, from_address, userInfo.user_address],
@@ -433,7 +436,7 @@ function respond (from_address, text, response = '') {
 										WHERE transaction_id=? AND user_email=?`,
 										[0, transaction_id, userInfo.user_email],
 										() => {
-											sendVerificationCodeByEmailAndMarkIsSent(userInfo.user_email, row.code, transaction_id, from_address);
+											sendVerificationCodeToEmailAndMarkIsSent(userInfo.user_email, row.code, transaction_id, from_address);
 										}
 									);
 								} else {
@@ -445,6 +448,8 @@ function respond (from_address, text, response = '') {
 										 */
 										db.query(
 											`SELECT
+												payment_unit,
+												post_publicly,
 												code, result, number_of_attempts
 											FROM transactions
 											JOIN receiving_addresses USING(receiving_address)
@@ -471,6 +476,13 @@ function respond (from_address, text, response = '') {
 															WHERE transaction_id=? AND user_email=?`,
 															[1, transaction_id, userInfo.user_email],
 															() => {
+																unlock(false);
+
+																device.sendMessageToDevice(
+																	from_address,
+																	'text',
+																	(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
+																);
 
 																db.query(
 																	`INSERT ${db.getIgnore()} INTO attestation_units 
@@ -478,13 +490,72 @@ function respond (from_address, text, response = '') {
 																	VALUES (?)`,
 																	[transaction_id],
 																	() => {
-																		unlock(false);
 
-																		device.sendMessageToDevice(
-																			from_address,
-																			'text',
-																			(response ? response + '\n\n' : '') + texts.codeConfirmedEmailInAttestation(userInfo.user_email)
+																		let	[attestation, src_profile] = emailAttestation.getAttestationPayloadAndSrcProfile(
+																			userInfo.user_address,
+																			userInfo.user_email,
+																			row.post_publicly
 																		);
+
+																		emailAttestation.postAndWriteAttestation(
+																			transaction_id,
+																			emailAttestation.emailAttestorAddress,
+																			attestation,
+																			src_profile,
+																		);
+
+																		if (checkIsEmailQualifiedForReward(userInfo.user_email) && conf.rewardInUSD) {
+																			let rewardInBytes = conversion.getPriceInBytes(conf.rewardInUSD);
+																			db.query(
+																				`INSERT ${db.getIgnore()} INTO reward_units
+																				(transaction_id, user_address, user_email, user_id, reward)
+																				VALUES (?,?,?,?,?)`,
+																				[transaction_id, userInfo.user_address, userInfo.user_email, attestation.profile.user_id, rewardInBytes],
+																				(res) => {
+																					console.error(`reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
+																					if (!res.affectedRows) {
+																						return console.log(`duplicate user_address or user_id: ${userInfo.user_address}, ${attestation.profile.user_id}`);
+																					}
+
+																					device.sendMessageToDevice(from_address, 'text', texts.attestedSuccessFirstTimeBonus(rewardInBytes));
+																					reward.sendAndWriteReward('attestation', transaction_id);
+
+																					if (conf.referralRewardInUSD) {
+																						let referralRewardInBytes = conversion.getPriceInBytes(conf.referralRewardInUSD);
+																						reward.findReferral(row.payment_unit, (referring_user_id, referring_user_address, referring_user_device_address) => {
+																							if (!referring_user_address) {
+																								// console.error("no referring user for " + row.user_address);
+																								return console.log("no referring user for " + userInfo.user_address);
+																							}
+
+																							db.query(
+																								`INSERT ${db.getIgnore()} INTO referral_reward_units
+																								(transaction_id, user_address, user_id, new_user_address, new_user_id, reward)
+																								VALUES (?, ?,?, ?,?, ?)`,
+																								[transaction_id,
+																									referring_user_address, referring_user_id,
+																									userInfo.user_address, attestation.profile.user_id,
+																									referralRewardInBytes],
+																								(res) => {
+																									console.log(`referral_reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
+																									if (!res.affectedRows) {
+																										return notifications.notifyAdmin(
+																											"duplicate referral reward",
+																											`referral reward for new user ${userInfo.user_address} ${attestation.profile.user_id} already written`
+																										);
+																									}
+
+																									device.sendMessageToDevice(referring_user_device_address, 'text', texts.referredUserBonus(conf.referralRewardInBytes));
+																									reward.sendAndWriteReward('referral', transaction_id);
+																								}
+																							);
+																						});
+																					} // if conf.referralRewardInBytes
+
+																				}
+																			);
+																		} // if conf.rewardInBytes
+
 																	}
 																);
 
@@ -546,8 +617,8 @@ function respond (from_address, text, response = '') {
 												}
 											});
 
-									}, (bIsNeedNextCall) => {
-										if (!bIsNeedNextCall) return;
+									}, (bIsNeededNextCall) => {
+										if (!bIsNeededNextCall) return;
 
 										callLastScenarioChecks();
 									}); // mutex.lock userInfo.user_address
@@ -597,6 +668,18 @@ function respond (from_address, text, response = '') {
 			});
 		});
 	});
+}
+
+function checkIsEmailQualifiedForReward(email) {
+	let objRewardWhiteListEmails = conf.objRewardWhiteListEmails;
+	for (let key in objRewardWhiteListEmails) {
+		if (!objRewardWhiteListEmails.hasOwnProperty(key)) continue;
+		console.error('checkIsEmailQualifiedForReward', objRewardWhiteListEmails[key].test(email), email, objRewardWhiteListEmails[key]);
+		if (objRewardWhiteListEmails[key].test(email)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**

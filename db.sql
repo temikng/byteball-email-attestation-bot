@@ -48,6 +48,7 @@ CREATE TABLE verification_emails (
 	PRIMARY KEY (transaction_id, user_email),
 	FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
 );
+CREATE INDEX byVerificationEmailIsSent ON verification_emails(is_sent);
 
 CREATE TABLE attestation_units (
 	transaction_id INTEGER NOT NULL,
@@ -73,6 +74,7 @@ CREATE TABLE rejected_payments (
 CREATE TABLE reward_units (
 	transaction_id INTEGER NOT NULL PRIMARY KEY,
 	user_address CHAR(32) NOT NULL UNIQUE,
+	user_email VARCHAR(320) NOT NULL UNIQUE,
 	user_id CHAR(44) NOT NULL UNIQUE,
 	reward INT NOT NULL,
 	reward_unit CHAR(44) NULL UNIQUE,

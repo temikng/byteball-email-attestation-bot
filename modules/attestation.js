@@ -7,122 +7,27 @@ const notifications = require('./notifications');
 const texts = require('./texts');
 
 function retryPostingAttestations() {
-	let device = require('byteballcore/device.js');
-	let reward = require('./reward');
 	db.query(
 		`SELECT 
 			transaction_id, 
-			user_email, post_publicly, user_address
+			user_address, user_email, post_publicly
 		FROM attestation_units
 		JOIN transactions USING(transaction_id)
 		JOIN receiving_addresses USING(receiving_address)
-		WHERE attestation_unit IS NULL`,
-		(rowsAttestation) => {
-			rowsAttestation.forEach((rowAttestation) => {
+		WHERE attestation_unit IS NULL AND post_publicly=0`,
+		(rows) => {
+			rows.forEach((row) => {
 				let	[attestation, src_profile] = getAttestationPayloadAndSrcProfile(
-					rowAttestation.user_address,
-					rowAttestation.user_email,
-					rowAttestation.post_publicly
+					row.user_address,
+					row.user_email,
+					row.post_publicly
 				);
-				// console.error('retryPostingAttestations: ' + rowAttestation.transaction_id + ' ' + rowAttestation.post_publicly);
+				// console.error('retryPostingAttestations: ' + row.transaction_id + ' ' + row.post_publicly);
 				// console.error(attestation);
 				// console.error(src_profile);
-				postAndWriteAttestation(
-					rowAttestation.transaction_id,
-					exports.emailAttestorAddress,
-					attestation,
-					src_profile,
-					(err, unit) => {
-						if (err) return;
-						if (!unit) return; // already posted
-
-						db.query(
-							`SELECT
-								COUNT(*) AS count
-							FROM receiving_addresses
-							JOIN transactions USING(receiving_address)
-							LEFT JOIN verification_emails USING(transaction_id, user_email)
-							LEFT JOIN attestation_units USING(transaction_id)
-							WHERE user_address = ? 
-								AND verification_emails.result = 1 
-								AND attestation_units.attestation_unit IS NOT NULL`,
-							[rowAttestation.user_address],
-							(rowsOfCount) => {
-								let rowOfCount = rowsOfCount[0];
-								// console.error('rowOfCount.count: ' + rowOfCount.count);
-								if (rowOfCount.count > 1) return; // this is not first time
-
-								db.query(
-									`SELECT
-										device_address, payment_unit
-									FROM receiving_addresses
-									JOIN transactions USING(receiving_address)
-									WHERE transaction_id=? AND user_address=?`,
-									[rowAttestation.transaction_id, rowAttestation.user_address],
-									(rows) => {
-										let row = rows[0];
-
-										if (conf.rewardInBytes) {
-											let rewardInBytes = conf.rewardInBytes;
-											db.query(
-												`INSERT ${db.getIgnore()} INTO reward_units
-												(transaction_id, user_address, user_id, reward)
-												VALUES (?,?,?,?)`,
-												[rowAttestation.transaction_id, rowAttestation.user_address, attestation.profile.user_id, rewardInBytes],
-												(res) => {
-													// console.error(`reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
-													if (!res.affectedRows) {
-														return console.log(`duplicate user_address or user_id: ${rowAttestation.user_address}, ${attestation.profile.user_id}`);
-													}
-
-													device.sendMessageToDevice(row.device_address, 'text', texts.attestedSuccessFirstTimeBonus(rewardInBytes));
-													reward.sendAndWriteReward('attestation', rowAttestation.transaction_id);
-
-													if (conf.referralRewardInBytes) {
-														let referralRewardInBytes = conf.referralRewardInBytes;
-														reward.findReferral(row.payment_unit, (referring_user_id, referring_user_address, referring_user_device_address) => {
-															if (!referring_user_address) {
-																// console.error("no referring user for " + rowAttestation.user_address);
-																return console.log("no referring user for " + rowAttestation.user_address);
-															}
-
-															db.query(
-																`INSERT ${db.getIgnore()} INTO referral_reward_units
-																(transaction_id, user_address, user_id, new_user_address, new_user_id, reward)
-																VALUES (?, ?,?, ?,?, ?)`,
-																[transaction_id,
-																	referring_user_address, referring_user_id,
-																	rowAttestation.user_address, attestation.profile.user_id,
-																	referralRewardInBytes],
-																(res) => {
-																	console.log(`referral_reward_units insertId: ${res.insertId}, affectedRows: ${res.affectedRows}`);
-																	if (!res.affectedRows) {
-																		return notifications.notifyAdmin(
-																			"duplicate referral reward",
-																			`referral reward for new user ${rowAttestation.user_address} ${attestation.profile.user_id} already written`
-																		);
-																	}
-
-																	device.sendMessageToDevice(referring_user_device_address, 'text', texts.referredUserBonus(conf.referralRewardInBytes));
-																	reward.sendAndWriteReward('referral', rowAttestation.transaction_id);
-																}
-															);
-														});
-													} // if conf.referralRewardInBytes
-												}
-											);
-										} // if conf.rewardInBytes
-
-									} // rows
-								);
-
-							} // rowsOfCount
-						);
-
-					}
-				); // postAndWriteAttestation
+				postAndWriteAttestation(row.transaction_id, exports.emailAttestorAddress, attestation, src_profile);
 			});
-		} // rowsAttestation
+		}
 	);
 }
 
@@ -152,7 +57,7 @@ function postAndWriteAttestation(transaction_id, attestor_address, attestation_p
 
 					db.query(
 						`UPDATE attestation_units 
-						SET attestation_unit=?, attestation_date=${db.getNow()} 
+						SET attestation_unit=?, attestation_date=${db.getNow()}
 						WHERE transaction_id=?`,
 						[unit, transaction_id],
 						() => {
@@ -170,10 +75,7 @@ function postAndWriteAttestation(transaction_id, attestor_address, attestation_p
 									"You will be able to use it to access the services that require a proven identity.";
 							}
 
-							text += "\n\nRemember, we have a referral program: " +
-								"if you send Bytes from your attested address to a new user who is not attested yet, " +
-								"and he/she uses those Bytes to pay for a successful attestation, " +
-								"you receive a "+conf.referralRewardInBytes+" Bytes reward.";
+							text += "\n\n" + texts.weHaveReferralProgram();
 							device.sendMessageToDevice(row.device_address, 'text', text);
 							callback(null, unit);
 							unlock();
@@ -190,7 +92,7 @@ function postAttestation(attestor_address, payload, onDone) {
 		console.error("attestation failed: " + err);
 		let balances = require('byteballcore/balances');
 		balances.readBalance(attestor_address, (balance) => {
-			console.error(balance);
+			console.error('balance', balance);
 			notifications.notifyAdmin('attestation failed', err + ", balance: " + JSON.stringify(balance));
 		});
 		onDone(err);
