@@ -167,7 +167,7 @@ function handleNewTransactions(arrUnits) {
 		`SELECT
 			amount, asset, unit,
 			receiving_address, device_address, user_address, user_email, price, 
-			${db.getUnixTimestamp('last_price_date')} AS price_ts, is_requiring_renewal
+			${db.getUnixTimestamp('last_price_date')} AS price_ts
 		FROM outputs
 		CROSS JOIN receiving_addresses ON receiving_addresses.receiving_address = outputs.address
 		WHERE unit IN(?)
@@ -180,24 +180,6 @@ function handleNewTransactions(arrUnits) {
 		[arrUnits],
 		(rows) => {
 			rows.forEach((row) => {
-
-				function updateReceivingAddressIfItIsMarkedWithIsRequiringRenewal(row) {
-					return new Promise((resolve, reject) => {
-						if (row.is_requiring_renewal === 1) {
-							db.query(
-								`UPDATE receiving_addresses 
-								SET is_requiring_renewal=0
-								WHERE device_address=? AND user_address=? AND user_email=?`,
-								[row.device_address, row.user_address, row.user_email],
-								() => {
-									resolve();
-								}
-							);
-						} else {
-							resolve();
-						}
-					});
-				}
 
 				checkPayment(row, (error) => {
 					if (error) {
@@ -212,22 +194,17 @@ function handleNewTransactions(arrUnits) {
 						);
 					}
 
-					updateReceivingAddressIfItIsMarkedWithIsRequiringRenewal(row)
-						.then(() => {
-							db.query(
-								`INSERT INTO transactions
-								(receiving_address, price, received_amount, payment_unit)
-								VALUES (?,?,?,?)`,
-								[row.receiving_address, row.price, row.amount, row.unit],
-								() => {
-									device.sendMessageToDevice(row.device_address, 'text', texts.receivedYourPayment(row.amount));
-								}
-							);
-						})
-						.catch((err) => {
-							notifications.notifyAdmin('handleNewTransactions', err)
-						});
-				});
+					db.query(
+						`INSERT INTO transactions
+						(receiving_address, price, received_amount, payment_unit)
+						VALUES (?,?,?,?)`,
+						[row.receiving_address, row.price, row.amount, row.unit],
+						() => {
+							device.sendMessageToDevice(row.device_address, 'text', texts.receivedYourPayment(row.amount));
+						}
+					);
+
+				}); // checkPayment
 
 			});
 		}
@@ -380,37 +357,7 @@ function respond (from_address, text, response = '') {
 					return device.sendMessageToDevice(from_address, 'text', (response ? response + '\n\n' : '') + userEmailResponse);
 				}
 
-				if (text === 'again') {
-					return mutex.lock([from_address], (unlock) => {
-						db.query(
-							`SELECT receiving_address, post_publicly, is_requiring_renewal
-							FROM receiving_addresses 
-							WHERE device_address=? AND user_address=? AND user_email=?`,
-							[from_address, userInfo.user_address, userInfo.user_email],
-							(rows) => {
-								if (rows.length > 0) {
-									let row = rows[0];
-									if (row.post_publicly !== null) {
-										return db.query(
-											`UPDATE receiving_addresses 
-											SET post_publicly=null, is_requiring_renewal=?
-											WHERE device_address=? AND user_address=? AND user_email=?`,
-											[1, from_address, userInfo.user_address, userInfo.user_email],
-											() => {
-												device.sendMessageToDevice(from_address, 'text', (response ? response + '\n\n' : '') + texts.privateOrPublic());
-												unlock();
-											}
-										)
-									}
-								}
-								device.sendMessageToDevice(from_address, 'text', (response ? response + '\n\n' : '') + texts.privateOrPublic());
-								unlock();
-							}
-						);
-					});
-				}
-
-				readOrAssignReceivingAddress(from_address, userInfo, (receiving_address, post_publicly, isRequiringRenewal) => {
+				readOrAssignReceivingAddress(from_address, userInfo, (receiving_address, post_publicly) => {
 					let price = conf.priceInBytes;
 
 					if (text === 'private' || text === 'public') {
@@ -428,11 +375,20 @@ function respond (from_address, text, response = '') {
 						return device.sendMessageToDevice(from_address, 'text', (response ? response + '\n\n' : '') + texts.privateOrPublic());
 					}
 
-					/**
-					 * if user says: "again", he needs to pay again
-					 */
-					if (isRequiringRenewal) {
-						return device.sendMessageToDevice(from_address, 'text', (response ? response + '\n\n' : '') + texts.pleasePay(receiving_address, price));
+					if (text === 'again') {
+						return device.sendMessageToDevice(
+							from_address,
+							'text',
+							(response ? response + '\n\n' : '') + texts.privateOrPublic(),
+							{
+								ifOk: () => {
+									device.sendMessageToDevice(from_address, 'text', texts.pleasePay(receiving_address, price));
+								},
+								ifError: (err) => {
+									console.error(err);
+								}
+							}
+						);
 					}
 
 					db.query(
@@ -492,6 +448,10 @@ function respond (from_address, text, response = '') {
 											sendVerificationCodeToEmailAndMarkIsSent(userInfo.user_email, row.code, transaction_id, from_address);
 										}
 									);
+								} else if (text === 'private' || text === 'public') {
+
+									return device.sendMessageToDevice(from_address, 'text', response);
+
 								} else {
 
 									return mutex.lock(['tx-'+transaction_id], (unlock) => {
@@ -763,14 +723,14 @@ function readOrAssignReceivingAddress(device_address, userInfo, callback) {
 	const mutex = require('byteballcore/mutex.js');
 	mutex.lock([device_address], (unlock) => {
 		db.query(
-			`SELECT receiving_address, post_publicly, ${db.getUnixTimestamp('last_price_date')} AS price_ts, is_requiring_renewal
+			`SELECT receiving_address, post_publicly, ${db.getUnixTimestamp('last_price_date')} AS price_ts
 			FROM receiving_addresses 
 			WHERE device_address=? AND user_address=? AND user_email=?`,
 			[device_address, userInfo.user_address, userInfo.user_email],
 			(rows) => {
 				if (rows.length > 0) {
 					let row = rows[0];
-					callback(row.receiving_address, row.post_publicly, row.is_requiring_renewal === 1);
+					callback(row.receiving_address, row.post_publicly);
 					return unlock();
 				}
 
@@ -781,7 +741,7 @@ function readOrAssignReceivingAddress(device_address, userInfo, callback) {
 						VALUES(?,?,?,?,?,${db.getNow()})`,
 						[device_address, userInfo.user_address, userInfo.user_email, receiving_address, conf.priceInBytes],
 						() => {
-							callback(receiving_address, null, false);
+							callback(receiving_address, null);
 							unlock();
 						}
 					);
