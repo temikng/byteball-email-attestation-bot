@@ -379,15 +379,8 @@ function respond (from_address, text, response = '') {
 						return device.sendMessageToDevice(
 							from_address,
 							'text',
-							(response ? response + '\n\n' : '') + texts.privateOrPublic(),
-							{
-								ifOk: () => {
-									device.sendMessageToDevice(from_address, 'text', texts.pleasePay(receiving_address, price));
-								},
-								ifError: (err) => {
-									console.error(err);
-								}
-							}
+							(response ? response + '\n\n' : '') + texts.pleasePay(receiving_address, price) + '\n\n' +
+							((post_publicly === 0) ? texts.privateChoose() : texts.publicChoose())
 						);
 					}
 
