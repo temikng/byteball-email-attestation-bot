@@ -22,32 +22,39 @@ eventBus.on('paired', (from_address) => {
 });
 
 /**
- * user sends message to the bot
+ * ready headless and conversion rates
  */
-eventBus.on('text', (from_address, text) => {
-	respond(from_address, text.trim());
-});
-
-/**
- * user pays to the bot
- */
-eventBus.on('new_my_transactions', handleNewTransactions);
-
-/**
- * pay is confirmed
- */
-eventBus.on('my_transactions_became_stable', handleTransactionsBecameStable);
+eventBus.once('headless_and_rates_ready', handleHeadlessAndRatesReady);
 
 /**
  * ready headless wallet
  */
 eventBus.once('headless_wallet_ready', handleWalletReady);
 
-if (conf.bRunWitness) {
-	require('byteball-witness');
-	eventBus.emit('headless_wallet_ready');
-} else {
-	headlessWallet.setupChatEventHandlers();
+function handleHeadlessAndRatesReady() {
+	if (conf.bRunWitness) {
+		require('byteball-witness');
+		eventBus.emit('headless_wallet_ready');
+	} else {
+		headlessWallet.setupChatEventHandlers();
+	}
+
+	/**
+	 * user sends message to the bot
+	 */
+	eventBus.on('text', (from_address, text) => {
+		respond(from_address, text.trim());
+	});
+
+	/**
+	 * user pays to the bot
+	 */
+	eventBus.on('new_my_transactions', handleNewTransactions);
+
+	/**
+	 * pay is confirmed
+	 */
+	eventBus.on('my_transactions_became_stable', handleTransactionsBecameStable);
 }
 
 function handleWalletReady() {
